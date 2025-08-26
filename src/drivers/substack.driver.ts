@@ -13,7 +13,9 @@ export class SubstackDriver implements PlatformDriver {
   }
 
   async createDraft(input: PostDraftInput): Promise<{ id: string; editUrl?: string }> {
+
     await this.ensureAuth();
+
     const { browser, context } = await openContext();
     try {
       const page = await newPage(context);
@@ -38,6 +40,7 @@ export class SubstackDriver implements PlatformDriver {
   }
 
   async publishPost(input: PublishPostInput): Promise<{ publicUrl: string }> {
+
     await this.ensureAuth();
     if (!env.SUBSTACK_PUBLICATION_URL) {
       throw new Error('SUBSTACK_PUBLICATION_URL not configured');

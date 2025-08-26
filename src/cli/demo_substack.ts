@@ -4,6 +4,9 @@ async function main() {
   const cmd = process.argv[2];
   const driver = new SubstackDriver();
 
+  await driver.ensureAuth();
+
+
   if (cmd === 'draft') {
     const title = process.argv[3] || 'Title';
     const html = process.argv[4] || '<p>Body</p>';
