@@ -2,7 +2,15 @@ import type { PlatformDriver } from './platformDriver.js';
 import type { PostDraftInput, PublishPostInput, NoteInput, Comment, Stats, StatsRange } from '../types/schemas.js';
 import { env, flags } from '../infra/config.js';
 import { openContext, newPage, saveAuthState, humanPause } from '../infra/playwright.js';
-import { TITLE_INPUT, BODY_EDITOR, PUBLISH_BUTTON } from '../infra/selectors/substack.js';
+import {
+  TITLE_INPUT,
+  TITLE_INPUT_FALLBACKS,
+  BODY_EDITOR,
+  BODY_EDITOR_FALLBACKS,
+  PUBLISH_BUTTON,
+  PUBLISH_BUTTON_FALLBACKS,
+  waitForFirstVisible,
+} from '../infra/selectors/substack.js';
 import fs from 'node:fs';
 import path from 'node:path';
 
@@ -30,46 +38,51 @@ export class SubstackDriver implements PlatformDriver {
         ? `${env.SUBSTACK_PUBLICATION_URL}/publish`
         : `${env.SUBSTACK_BASE_URL}/publish`;
       await page.goto(composeUrl);
+      await page.waitForLoadState('domcontentloaded');
       try {
-        await page.waitForSelector(TITLE_INPUT);
-        await page.waitForSelector(BODY_EDITOR);
-      } catch (err) {
-        throw new Error(
-          'Selectors TITLE_INPUT or BODY_EDITOR not found – Substack UI may have changed',
-        );
+        await page.waitForLoadState('networkidle');
+      } catch {
+        // ignore quick timeout
       }
+      await page.waitForSelector('body', { state: 'visible', timeout: 10_000 });
+      const titleSel = await waitForFirstVisible(page, [
+        TITLE_INPUT,
+        ...TITLE_INPUT_FALLBACKS,
+      ]);
+      const bodySel = await waitForFirstVisible(page, [
+        BODY_EDITOR,
+        ...BODY_EDITOR_FALLBACKS,
+      ]);
       console.log('Navigated to composer:', composeUrl);
       await humanPause();
-      console.log(`Typing title into: ${TITLE_INPUT}`);
+      console.log(`Typing title into: ${titleSel}`);
       if (flags.safeMode) {
-        console.log('SAFE_MODE enabled – skipping title fill');
+        console.log('SAFE_MODE – skipping title fill');
       } else {
-        try {
-          await page.fill(TITLE_INPUT, input.title);
-        } catch (err) {
-          throw new Error('Selector TITLE_INPUT not found – Substack UI may have changed');
-        }
+        await page.fill(titleSel, input.title);
       }
-      console.log(`Inserting body HTML into: ${BODY_EDITOR}`);
+      console.log(`Inserting body HTML into: ${bodySel}`);
       if (flags.safeMode) {
-        console.log('SAFE_MODE enabled – skipping body HTML insertion');
+        console.log('SAFE_MODE – skipping body HTML insertion');
+        console.log('SAFE_MODE – skipping editor verification');
       } else {
+        await page.focus(bodySel);
         try {
-          await page.evaluate(
-            (
-              { selector, html }: { selector: string; html: string },
-            ) => {
-              const el = document.querySelector(selector) as HTMLElement | null;
-              if (!el) {
-                throw new Error('not found');
-              }
-              el.innerHTML = html;
-            },
-            { selector: BODY_EDITOR, html: input.html },
-          );
+          await page.evaluate(async (html) => {
+            await navigator.clipboard.writeText(html);
+          }, input.html);
+          await page.keyboard.press('Control+V');
         } catch (err) {
-          throw new Error('Selector BODY_EDITOR not found – Substack UI may have changed');
+          const msg = err instanceof Error ? err.message : String(err);
+          console.warn('Clipboard unavailable, falling back to typing:', msg);
+          await page.type(bodySel, input.html.replace(/<[^>]+>/g, ''));
         }
+        await page.waitForFunction(
+          (sel) => !!document.querySelector(sel)?.textContent?.trim(),
+          bodySel,
+          { timeout: 5000 },
+        );
+        console.log('Editor content verified');
       }
       if (input.tags?.length) {
         console.log('TODO: apply tags', input.tags);
@@ -99,24 +112,27 @@ export class SubstackDriver implements PlatformDriver {
       const page = await newPage(context);
       const composeUrl = `${env.SUBSTACK_PUBLICATION_URL}/publish`;
       await page.goto(composeUrl);
+      await page.waitForLoadState('domcontentloaded');
       try {
-        await page.waitForSelector(PUBLISH_BUTTON);
-      } catch (err) {
-        throw new Error('Selector PUBLISH_BUTTON not found – Substack UI may have changed');
+        await page.waitForLoadState('networkidle');
+      } catch {
+        // ignore
       }
+      await page.waitForSelector('body', { state: 'visible', timeout: 10_000 });
+      const publishSel = await waitForFirstVisible(page, [
+        PUBLISH_BUTTON,
+        ...PUBLISH_BUTTON_FALLBACKS,
+      ]);
       console.log('Opened composer to publish draft', input.id);
       if (input.scheduleAt) {
         console.log('TODO: schedule publish at', input.scheduleAt);
       }
-      console.log('Clicking publish button');
+      console.log('Clicking publish button via', publishSel);
       if (flags.safeMode) {
-        console.log('SAFE_MODE enabled – skipping publish click');
+        console.log('SAFE_MODE – skipping publish click');
       } else {
-        try {
-          await page.click(PUBLISH_BUTTON);
-        } catch (err) {
-          throw new Error('Selector PUBLISH_BUTTON not found – Substack UI may have changed');
-        }
+        await page.click(publishSel);
+        await page.waitForTimeout(500);
       }
       const publicUrl = page.url();
       console.log('Post published', publicUrl);
