@@ -11,7 +11,10 @@ export async function openContext(): Promise<{ browser: Browser; context: Browse
   if (fs.existsSync(AUTH_PATH)) {
     ctxOptions.storageState = AUTH_PATH;
   }
-  const context = await browser.newContext(ctxOptions);
+  const context = await browser.newContext({
+    ...(ctxOptions.storageState ? { storageState: ctxOptions.storageState } : {}),
+    permissions: ['clipboard-read', 'clipboard-write'],
+  });
   return { browser, context };
 }
 

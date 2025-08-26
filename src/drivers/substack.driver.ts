@@ -57,13 +57,14 @@ export class SubstackDriver implements PlatformDriver {
       await humanPause();
       console.log(`Typing title into: ${titleSel}`);
       if (flags.safeMode) {
-        console.log('SAFE_MODE enabled – skipping title fill');
+        console.log('SAFE_MODE – skipping title fill');
       } else {
         await page.fill(titleSel, input.title);
       }
       console.log(`Inserting body HTML into: ${bodySel}`);
       if (flags.safeMode) {
-        console.log('SAFE_MODE enabled – skipping body HTML insertion');
+        console.log('SAFE_MODE – skipping body HTML insertion');
+        console.log('SAFE_MODE – skipping editor verification');
       } else {
         await page.focus(bodySel);
         try {
@@ -72,9 +73,17 @@ export class SubstackDriver implements PlatformDriver {
           }, input.html);
           await page.keyboard.press('Control+V');
         } catch (err) {
-          console.warn('Clipboard unavailable, falling back to typing');
+          const msg = err instanceof Error ? err.message : String(err);
+          console.warn('Clipboard unavailable, falling back to typing:', msg);
+
           await page.type(bodySel, input.html.replace(/<[^>]+>/g, ''));
         }
+        await page.waitForFunction(
+          (sel) => !!document.querySelector(sel)?.textContent?.trim(),
+          bodySel,
+          { timeout: 5000 },
+        );
+        console.log('Editor content verified');
       }
       if (input.tags?.length) {
         console.log('TODO: apply tags', input.tags);
@@ -121,7 +130,7 @@ export class SubstackDriver implements PlatformDriver {
       }
       console.log('Clicking publish button via', publishSel);
       if (flags.safeMode) {
-        console.log('SAFE_MODE enabled – skipping publish click');
+        console.log('SAFE_MODE – skipping publish click');
       } else {
         await page.click(publishSel);
         await page.waitForTimeout(500);
