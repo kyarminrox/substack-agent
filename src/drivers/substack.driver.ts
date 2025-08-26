@@ -75,6 +75,7 @@ export class SubstackDriver implements PlatformDriver {
         } catch (err) {
           const msg = err instanceof Error ? err.message : String(err);
           console.warn('Clipboard unavailable, falling back to typing:', msg);
+
           await page.type(bodySel, input.html.replace(/<[^>]+>/g, ''));
         }
         await page.waitForFunction(

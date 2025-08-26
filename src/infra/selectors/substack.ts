@@ -1,9 +1,8 @@
-// Primary
 export const TITLE_INPUT_PRIMARY = 'textarea[placeholder="Title"]';
 export const BODY_EDITOR_PRIMARY = 'div[contenteditable="true"]';
 export const PUBLISH_BUTTON_PRIMARY = 'button:has-text("Publish")';
 
-// Fallbacks
+
 export const TITLE_INPUT_FALLBACKS = [
   'textarea[aria-label="Title"]',
   '[data-testid="post-title"] textarea',
@@ -19,7 +18,8 @@ export const PUBLISH_BUTTON_FALLBACKS = [
   'role=button[name=/^(Publish|Post)$/i]',
 ];
 
-// Back-compat aliases
+
+// Existing exports retained for backwards compatibility
 export const TITLE_INPUT = TITLE_INPUT_PRIMARY;
 export const BODY_EDITOR = BODY_EDITOR_PRIMARY;
 export const PUBLISH_BUTTON = PUBLISH_BUTTON_PRIMARY;
