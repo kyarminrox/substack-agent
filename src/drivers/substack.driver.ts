@@ -38,7 +38,8 @@ export class SubstackDriver implements PlatformDriver {
       }
       await humanPause();
       await saveAuthState(context);
-      console.log(`Saved Substack auth state to: ${path.resolve(AUTH_PATH)}`);
+      console.log('Saved Substack auth state to:', path.resolve(AUTH_PATH));
+
       return { id: `draft_${Date.now()}`, editUrl: page.url() };
     } finally {
       await context.close();
@@ -67,7 +68,9 @@ export class SubstackDriver implements PlatformDriver {
         console.log('TODO: click Publish');
       }
       await saveAuthState(context);
-      console.log(`Saved Substack auth state to: ${path.resolve(AUTH_PATH)}`);
+
+      console.log('Saved Substack auth state to:', path.resolve(AUTH_PATH));
+
       return { publicUrl: page.url() };
     } finally {
       await context.close();
