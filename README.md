@@ -38,7 +38,9 @@ Environment
 - `SUBSTACK_AUTH_DIR` – Playwright auth storage path
 - See `.env.example`
 
+
 > Medium API: You can create DRAFT or PUBLIC posts, but you cannot "publish a draft later" via API. If you need a draft for review, create with `publishStatus = draft` and publish manually in Medium, or create a PUBLIC post directly when ready.
+main
 
 Never commit auth cookies or tokens.
 
