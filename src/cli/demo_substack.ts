@@ -36,5 +36,40 @@ async function main() {
 main().catch((err) => {
   console.error('Error:', err);
   process.exit(1);
-});
+
+  try {
+    if (cmd === 'draft') {
+      await driver.ensureAuth();
+      const title = process.argv[3];
+      const html = process.argv[4];
+      if (!title || !html) {
+        console.log('Usage: demo_substack.ts draft <title> <html>');
+        return;
+      }
+      const out = await driver.createDraft({ title, html });
+      console.log('Draft created:', out.id);
+      if (out.editUrl) {
+        console.log('Edit URL:', out.editUrl);
+      }
+    } else if (cmd === 'publish') {
+      await driver.ensureAuth();
+      const id = process.argv[3];
+      if (!id) {
+        console.log('Usage: demo_substack.ts publish <id>');
+        return;
+      }
+      const out = await driver.publishPost({ id });
+      console.log('Post published:', out.publicUrl);
+    } else {
+      console.log('Usage:');
+      console.log('  demo_substack.ts draft <title> <html>');
+      console.log('  demo_substack.ts publish <id>');
+    }
+  } catch (err) {
+    console.error('Error:', err);
+  }
+}
+
+main();
+
 
