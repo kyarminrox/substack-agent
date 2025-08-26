@@ -80,6 +80,7 @@ SUBSTACK_PUBLICATION_URL=https://yourpub.substack.com npm run demo:substack:publ
 Set `SAFE_MODE=true` to log actions without modifying Substack.
 Set `SAFE_MODE=false` to attempt real actions (authentication required).
 
+Selectors are maintained in `src/infra/selectors/substack.ts`. If Substack changes their UI, update selectors there.
 
 > Medium API: You can create DRAFT or PUBLIC posts, but you cannot "publish a draft later" via API. If you need a draft for review, create with `publishStatus = draft` and publish manually in Medium, or create a PUBLIC post directly when ready.
 
