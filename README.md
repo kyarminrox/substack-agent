@@ -76,6 +76,7 @@ npm run demo:substack:draft -- "Test Title" "<h1>Body</h1>"
 SUBSTACK_PUBLICATION_URL=https://yourpub.substack.com npm run demo:substack:publish -- draft_123
 ```
 
+
 Set `SAFE_MODE=true` in your environment or `.env` to log actions without modifying Substack.
 Set `SAFE_MODE=false` to attempt real actions (authentication required).
 
