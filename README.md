@@ -61,7 +61,7 @@ Environment flags:
 - `SUBSTACK_HEADLESS` – set to `false` to see the browser window (defaults to `true`).
 - `SAFE_MODE` – when `true`, actions are logged and the page still opens, but **Publish** is not clicked.
 
-Selectors in the Substack driver are currently TODO; the skeleton logs the intended steps and will be refined with screenshots in future iterations.
+Selectors used by the Substack driver live in `src/infra/selectors/substack.ts`. If Substack updates their UI, these selectors may need revisions.
 
 ### Demos
 

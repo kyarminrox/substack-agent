@@ -2,6 +2,7 @@ import type { PlatformDriver } from './platformDriver.js';
 import type { PostDraftInput, PublishPostInput, NoteInput, Comment, Stats, StatsRange } from '../types/schemas.js';
 import { env, flags } from '../infra/config.js';
 import { openContext, newPage, saveAuthState, humanPause } from '../infra/playwright.js';
+import { TITLE_INPUT, BODY_EDITOR, PUBLISH_BUTTON } from '../infra/selectors/substack.js';
 import fs from 'node:fs';
 import path from 'node:path';
 
@@ -31,8 +32,38 @@ export class SubstackDriver implements PlatformDriver {
       await page.goto(composeUrl);
       console.log('Navigated to composer:', composeUrl);
       await humanPause();
-      console.log('Setting title (TODO selector):', input.title);
-      console.log('Inserting body HTML (TODO)');
+      console.log(`Typing title into: ${TITLE_INPUT}`);
+      if (flags.safeMode) {
+        console.log('SAFE_MODE enabled – skipping title fill');
+      } else {
+        try {
+          await page.fill(TITLE_INPUT, input.title);
+        } catch (err) {
+          throw new Error('Selector TITLE_INPUT not found – Substack UI may have changed');
+        }
+      }
+      console.log(`Inserting body HTML into: ${BODY_EDITOR}`);
+      if (flags.safeMode) {
+        console.log('SAFE_MODE enabled – skipping body HTML insertion');
+      } else {
+        try {
+          await page.waitForSelector(BODY_EDITOR);
+          await page.evaluate(
+            (
+              { selector, html }: { selector: string; html: string },
+            ) => {
+              const el = document.querySelector(selector) as HTMLElement | null;
+              if (!el) {
+                throw new Error('not found');
+              }
+              el.innerHTML = html;
+            },
+            { selector: BODY_EDITOR, html: input.html },
+          );
+        } catch (err) {
+          throw new Error('Selector BODY_EDITOR not found – Substack UI may have changed');
+        }
+      }
       if (input.tags?.length) {
         console.log('TODO: apply tags', input.tags);
       }
@@ -62,10 +93,15 @@ export class SubstackDriver implements PlatformDriver {
       if (input.scheduleAt) {
         console.log('TODO: schedule publish at', input.scheduleAt);
       }
+      console.log('Clicking publish button');
       if (flags.safeMode) {
-        console.log('SAFE_MODE enabled - skipping publish');
+        console.log('SAFE_MODE enabled – skipping publish click');
       } else {
-        console.log('TODO: click Publish');
+        try {
+          await page.click(PUBLISH_BUTTON);
+        } catch (err) {
+          throw new Error('Selector PUBLISH_BUTTON not found – Substack UI may have changed');
+        }
       }
       await saveAuthState(context);
 
