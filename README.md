@@ -1,27 +1,43 @@
-# substack-agent
+# Substack Agent
 
-## Substack Agent
+AI agent to draft, schedule, publish, cross-post, and manage audience ops across **Substack** (via Playwright) and **Medium** (via API), with a clean driver interface and a review/approval dashboard.
 
-Substack Agent aims to provide an automated assistant for managing newsletters on Substack. The project demonstrates how language models can help draft posts, schedule publications, and interact with readers.
+## Status
+v0.1 — scaffolding and drivers. See `docs/Project-Requirements.md` for scope and plan.
 
-### Goals
-
-- Build a simple agent to automate common Substack tasks.
-- Offer an extensible foundation for experimenting with LLM-driven newsletter workflows.
-
-### Setup
-
-1. Clone the repository.
-2. (Optional) Create and activate a Python virtual environment.
-3. Install dependencies with `pip install -r requirements.txt` once a requirements file is available.
-
-### Usage
-
-After completing setup, run your agent script with:
-
+## Quick Start
 ```bash
-python agent.py
+# Node 18+ recommended
+npm i
+npm run dev
 ```
 
-Example scripts and configuration options will be added as the project evolves.
+Scripts
 
+npm run dev – run the app in TS directly
+
+npm run build – compile TS → JS in dist/
+
+npm start – run compiled app
+
+npm run lint – eslint
+
+npm test – placeholder (vitest)
+
+Project Structure
+src/
+  brains/           # planner / style memory adapters
+  drivers/          # platform drivers: substack, medium, gmail, etc.
+  workflows/        # publish_blog, schedule_notes, manage_inbox, ...
+  infra/            # queue, logger, config, secrets
+  index.ts          # entrypoint
+
+Environment
+
+Create .env from .env.example when added.
+
+Never commit auth cookies or tokens.
+
+License
+
+MIT
