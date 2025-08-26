@@ -135,6 +135,11 @@ dist
 !.yarn/sdks
 !.yarn/versions
 
+# Playwright artifacts
+playwright/.auth
+playwright-report/
+test-results/
+
 # Vite logs files
 vite.config.js.timestamp-*
 vite.config.ts.timestamp-*

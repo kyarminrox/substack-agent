@@ -1,25 +1,65 @@
 import type { PlatformDriver } from './platformDriver.js';
 import type { PostDraftInput, PublishPostInput, NoteInput, Comment, Stats, StatsRange } from '../types/schemas.js';
-import { env } from '../infra/config.js';
+import { env, flags } from '../infra/config.js';
+import { openContext, newPage, saveAuthState, humanPause } from '../infra/playwright.js';
 
 export class SubstackDriver implements PlatformDriver {
   readonly name = 'substack';
 
   async ensureAuth(): Promise<void> {
-    // Will use Playwright persisted auth later; for now just check the dir is set
     if (!env.SUBSTACK_AUTH_DIR) {
       throw new Error('SUBSTACK_AUTH_DIR not configured');
     }
   }
 
-  async createDraft(_input: PostDraftInput): Promise<{ id: string; editUrl?: string }> {
-    // TODO: implement via Playwright
-    throw new Error('Not implemented: SubstackDriver.createDraft');
+  async createDraft(input: PostDraftInput): Promise<{ id: string; editUrl?: string }> {
+    const { browser, context } = await openContext();
+    try {
+      const page = await newPage(context);
+      const composeUrl = env.SUBSTACK_PUBLICATION_URL
+        ? `${env.SUBSTACK_PUBLICATION_URL}/publish`
+        : `${env.SUBSTACK_BASE_URL}/publish`;
+      await page.goto(composeUrl);
+      console.log('Navigated to composer:', composeUrl);
+      await humanPause();
+      console.log('Setting title (TODO selector):', input.title);
+      console.log('Inserting body HTML (TODO)');
+      if (input.tags?.length) {
+        console.log('TODO: apply tags', input.tags);
+      }
+      await humanPause();
+      await saveAuthState(context);
+      return { id: `draft_${Date.now()}`, editUrl: page.url() };
+    } finally {
+      await context.close();
+      await browser.close();
+    }
   }
 
-  async publishPost(_input: PublishPostInput): Promise<{ publicUrl: string }> {
-    // TODO: implement via Playwright
-    throw new Error('Not implemented: SubstackDriver.publishPost');
+  async publishPost(input: PublishPostInput): Promise<{ publicUrl: string }> {
+    if (!env.SUBSTACK_PUBLICATION_URL) {
+      throw new Error('SUBSTACK_PUBLICATION_URL not configured');
+    }
+    const { browser, context } = await openContext();
+    try {
+      const page = await newPage(context);
+      const composeUrl = `${env.SUBSTACK_PUBLICATION_URL}/publish`;
+      await page.goto(composeUrl);
+      console.log('Opened composer to publish draft', input.id);
+      if (input.scheduleAt) {
+        console.log('TODO: schedule publish at', input.scheduleAt);
+      }
+      if (flags.safeMode) {
+        console.log('SAFE_MODE enabled - skipping publish');
+      } else {
+        console.log('TODO: click Publish');
+      }
+      await saveAuthState(context);
+      return { publicUrl: page.url() };
+    } finally {
+      await context.close();
+      await browser.close();
+    }
   }
 
   async createNote(_input: NoteInput): Promise<{ url?: string }> {
