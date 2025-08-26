@@ -34,9 +34,19 @@ src/
 
 Environment
 
-Create .env from .env.example when added.
+- `MEDIUM_TOKEN` – Medium API token
+- `SUBSTACK_AUTH_DIR` – Playwright auth storage path
+- See `.env.example`
+
+> Medium API: You can create DRAFT or PUBLIC posts, but you cannot "publish a draft later" via API. If you need a draft for review, create with `publishStatus = draft` and publish manually in Medium, or create a PUBLIC post directly when ready.
 
 Never commit auth cookies or tokens.
+
+### Medium draft demo
+```bash
+# set MEDIUM_TOKEN in .env
+npm run demo:medium:draft -- "My Title" "<h1>Hi</h1><p>Body</p>" "https://your-substack-post" "ai,automation"
+```
 
 License
 
