@@ -30,17 +30,9 @@ export class MediumDriver implements PlatformDriver {
   }
 
   async publishPost(_input: PublishPostInput): Promise<{ publicUrl: string }> {
-    throw new Error('Medium API does not support publishing an existing draft via API. Create a public post directly instead.');
-
-  async createDraft(_input: PostDraftInput): Promise<{ id: string; editUrl?: string }> {
-    // TODO: implement via Medium API
-    throw new Error('Not implemented: MediumDriver.createDraft');
-  }
-
-  async publishPost(_input: PublishPostInput): Promise<{ publicUrl: string }> {
-    // TODO: implement via Medium API
-    throw new Error('Not implemented: MediumDriver.publishPost');
-
+    throw new Error(
+      'Medium API does not support publishing an existing draft via API. Create a public post directly instead.',
+    );
   }
 
   async createNote(_input: NoteInput): Promise<{ url?: string }> {
