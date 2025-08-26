@@ -1,7 +1,6 @@
 # Substack Agent
 
 AI agent to draft, schedule, publish, cross-post, and manage audience ops across **Substack** (via Playwright) and **Medium** (via API), with a clean driver interface and a review/approval dashboard.
-
 ## Status
 v0.1 — scaffolding and drivers. See `docs/Project-Requirements.md` for scope and plan.
 
@@ -60,7 +59,7 @@ npm run auth:substack # a browser window will open; complete login and press Ent
 Environment flags:
 
 - `SUBSTACK_HEADLESS` – set to `false` to see the browser window (defaults to `true`).
-- `SAFE_MODE` – when `true`, publish actions are logged but not executed; the page still opens but the Publish button isn't clicked (defaults to `false`).
+- `SAFE_MODE` – when `true`, actions are logged and the page still opens, but **Publish** is not clicked.
 
 Selectors in the Substack driver are currently TODO; the skeleton logs the intended steps and will be refined with screenshots in future iterations.
 
