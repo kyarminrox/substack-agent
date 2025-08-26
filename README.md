@@ -77,7 +77,7 @@ SUBSTACK_PUBLICATION_URL=https://yourpub.substack.com npm run demo:substack:publ
 ```
 
 
-Set `SAFE_MODE=true` in your environment or `.env` to log actions without modifying Substack.
+Set `SAFE_MODE=true` to log actions without modifying Substack.
 Set `SAFE_MODE=false` to attempt real actions (authentication required).
 
 
