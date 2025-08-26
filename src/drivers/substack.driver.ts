@@ -30,6 +30,14 @@ export class SubstackDriver implements PlatformDriver {
         ? `${env.SUBSTACK_PUBLICATION_URL}/publish`
         : `${env.SUBSTACK_BASE_URL}/publish`;
       await page.goto(composeUrl);
+      try {
+        await page.waitForSelector(TITLE_INPUT);
+        await page.waitForSelector(BODY_EDITOR);
+      } catch (err) {
+        throw new Error(
+          'Selectors TITLE_INPUT or BODY_EDITOR not found – Substack UI may have changed',
+        );
+      }
       console.log('Navigated to composer:', composeUrl);
       await humanPause();
       console.log(`Typing title into: ${TITLE_INPUT}`);
@@ -47,7 +55,6 @@ export class SubstackDriver implements PlatformDriver {
         console.log('SAFE_MODE enabled – skipping body HTML insertion');
       } else {
         try {
-          await page.waitForSelector(BODY_EDITOR);
           await page.evaluate(
             (
               { selector, html }: { selector: string; html: string },
@@ -67,11 +74,14 @@ export class SubstackDriver implements PlatformDriver {
       if (input.tags?.length) {
         console.log('TODO: apply tags', input.tags);
       }
+      const id = `draft_${Date.now()}`;
+      const editUrl = page.url();
+      console.log('Draft created', id, editUrl);
       await humanPause();
       await saveAuthState(context);
       console.log('Saved Substack auth state to:', path.resolve(AUTH_PATH));
 
-      return { id: `draft_${Date.now()}`, editUrl: page.url() };
+      return { id, editUrl };
     } finally {
       await context.close();
       await browser.close();
@@ -89,6 +99,11 @@ export class SubstackDriver implements PlatformDriver {
       const page = await newPage(context);
       const composeUrl = `${env.SUBSTACK_PUBLICATION_URL}/publish`;
       await page.goto(composeUrl);
+      try {
+        await page.waitForSelector(PUBLISH_BUTTON);
+      } catch (err) {
+        throw new Error('Selector PUBLISH_BUTTON not found – Substack UI may have changed');
+      }
       console.log('Opened composer to publish draft', input.id);
       if (input.scheduleAt) {
         console.log('TODO: schedule publish at', input.scheduleAt);
@@ -103,11 +118,13 @@ export class SubstackDriver implements PlatformDriver {
           throw new Error('Selector PUBLISH_BUTTON not found – Substack UI may have changed');
         }
       }
+      const publicUrl = page.url();
+      console.log('Post published', publicUrl);
       await saveAuthState(context);
 
       console.log('Saved Substack auth state to:', path.resolve(AUTH_PATH));
 
-      return { publicUrl: page.url() };
+      return { publicUrl };
     } finally {
       await context.close();
       await browser.close();
