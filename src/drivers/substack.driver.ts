@@ -2,13 +2,17 @@ import type { PlatformDriver } from './platformDriver.js';
 import type { PostDraftInput, PublishPostInput, NoteInput, Comment, Stats, StatsRange } from '../types/schemas.js';
 import { env, flags } from '../infra/config.js';
 import { openContext, newPage, saveAuthState, humanPause } from '../infra/playwright.js';
+import fs from 'node:fs';
+import path from 'node:path';
+
+const AUTH_PATH = path.join(env.SUBSTACK_AUTH_DIR, 'substack.json');
 
 export class SubstackDriver implements PlatformDriver {
   readonly name = 'substack';
 
   async ensureAuth(): Promise<void> {
-    if (!env.SUBSTACK_AUTH_DIR) {
-      throw new Error('SUBSTACK_AUTH_DIR not configured');
+    if (!fs.existsSync(AUTH_PATH)) {
+      throw new Error(`No Substack auth found at ${AUTH_PATH}. Run: npm run auth:substack`);
     }
   }
 
@@ -32,6 +36,7 @@ export class SubstackDriver implements PlatformDriver {
       }
       await humanPause();
       await saveAuthState(context);
+      console.log('Saved Substack auth state to:', AUTH_PATH);
       return { id: `draft_${Date.now()}`, editUrl: page.url() };
     } finally {
       await context.close();
@@ -60,6 +65,7 @@ export class SubstackDriver implements PlatformDriver {
         console.log('TODO: click Publish');
       }
       await saveAuthState(context);
+      console.log('Saved Substack auth state to:', AUTH_PATH);
       return { publicUrl: page.url() };
     } finally {
       await context.close();
