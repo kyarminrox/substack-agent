@@ -38,6 +38,35 @@ Environment
 - `SUBSTACK_AUTH_DIR` – Playwright auth storage path
 - See `.env.example`
 
+### Substack (Playwright) setup
+
+Prereqs: install deps and run the interactive auth bootstrap.
+
+```bash
+npm i
+npm run auth:substack # a browser window will open; complete login and press Enter
+```
+
+Environment flags:
+
+- `SUBSTACK_HEADLESS` – set to `false` to see the browser window (defaults to `true`).
+- `SAFE_MODE` – when `true`, publish actions are logged but not executed (defaults to `false`).
+
+Selectors in the Substack driver are currently TODO; the skeleton logs the intended steps and will be refined with screenshots in future iterations.
+
+### Demos
+
+```bash
+# interactive login
+npm run auth:substack
+
+# create a draft (flip SAFE_MODE=true in .env to avoid accidental actions)
+npm run demo:substack draft "My Title" "<h1>Hello</h1><p>Body</p>"
+
+# publish now (SAFE_MODE=true will only log, not click Publish)
+npm run demo:substack publish
+```
+
 
 > Medium API: You can create DRAFT or PUBLIC posts, but you cannot "publish a draft later" via API. If you need a draft for review, create with `publishStatus = draft` and publish manually in Medium, or create a PUBLIC post directly when ready.
 main
