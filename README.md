@@ -82,6 +82,8 @@ Set `SAFE_MODE=false` to attempt real actions (authentication required).
 
 Selectors are maintained in `src/infra/selectors/substack.ts`. If Substack changes their UI, update selectors there.
 
+**Proxy / Troubleshooting:** Behind a proxy? Set `HTTPS_PROXY`/`HTTP_PROXY` env vars. You can also configure Playwright's proxy in code via `chromium.launch({ proxy: { server: 'http://your-proxy:8080' }})`. If installs fail, run `npx playwright install` and `npx playwright install-deps` again.
+
 > Medium API: You can create DRAFT or PUBLIC posts, but you cannot "publish a draft later" via API. If you need a draft for review, create with `publishStatus = draft` and publish manually in Medium, or create a PUBLIC post directly when ready.
 
 Never commit auth cookies or tokens.
