@@ -34,7 +34,9 @@ src/
 
 Environment
 
-Create .env from .env.example when added.
+- `MEDIUM_TOKEN` – Medium API token
+- `SUBSTACK_AUTH_DIR` – Playwright auth storage path
+- See `.env.example`
 
 Never commit auth cookies or tokens.
 
