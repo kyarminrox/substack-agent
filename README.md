@@ -69,12 +69,15 @@ Selectors used by the Substack driver live in `src/infra/selectors/substack.ts`.
 # interactive login
 npm run auth:substack
 
-# create a draft (flip SAFE_MODE=true in .env to avoid accidental actions)
-npm run demo:substack draft "My Title" "<h1>Hello</h1><p>Body</p>"
+# create a draft
+npm run demo:substack:draft -- "Test Title" "<h1>Body</h1>"
 
-# publish now (SAFE_MODE=true will open the page but skip clicking Publish)
-SUBSTACK_PUBLICATION_URL=https://yourpub.substack.com npm run demo:substack publish
+# publish an existing draft
+SUBSTACK_PUBLICATION_URL=https://yourpub.substack.com npm run demo:substack:publish -- draft_123
 ```
+
+Set `SAFE_MODE=true` in your environment or `.env` to log actions without modifying Substack.
+Set `SAFE_MODE=false` to attempt real actions (authentication required).
 
 
 > Medium API: You can create DRAFT or PUBLIC posts, but you cannot "publish a draft later" via API. If you need a draft for review, create with `publishStatus = draft` and publish manually in Medium, or create a PUBLIC post directly when ready.
