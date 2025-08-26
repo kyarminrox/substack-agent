@@ -3,7 +3,9 @@ import { SubstackDriver } from '../drivers/substack.driver.js';
 async function main() {
   const cmd = process.argv[2];
   const driver = new SubstackDriver();
+
   await driver.ensureAuth();
+
 
   if (cmd === 'draft') {
     const title = process.argv[3] || 'Title';
