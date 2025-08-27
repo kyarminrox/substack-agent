@@ -2,6 +2,9 @@ import type { PlatformDriver } from './platformDriver.js';
 import type { PostDraftInput, PublishPostInput, NoteInput, Comment, Stats, StatsRange } from '../types/schemas.js';
 import { env, flags } from '../infra/config.js';
 import { openContext, newPage, saveAuthState, humanPause } from '../infra/playwright.js';
+import { retry } from '../infra/retry.js';
+import { logJson } from '../infra/logger.js';
+import { appendRun } from '../infra/runs.js';
 import {
   TITLE_INPUT,
   TITLE_INPUT_FALLBACKS,
@@ -38,9 +41,10 @@ export class SubstackDriver implements PlatformDriver {
       const composeUrl = env.SUBSTACK_PUBLICATION_URL
         ? `${env.SUBSTACK_PUBLICATION_URL}/publish/post`
         : `${env.SUBSTACK_BASE_URL}/publish/post`;
-      await page.goto(composeUrl);
+      await retry(() => page.goto(composeUrl), { attempts: 3, delayMs: 500 });
       await page.waitForLoadState('domcontentloaded');
       await page.waitForSelector('body', { state: 'visible', timeout: 10_000 });
+      logJson('substack', 'info', { ev: 'compose_opened', url: composeUrl });
 
       // (A) dismiss the “dashboard got a refresh!” modal if present
       try {
@@ -65,10 +69,17 @@ export class SubstackDriver implements PlatformDriver {
       } catch {
         // ignore quick timeout
       }
-      const titleSel = await waitForFirstVisible(page, [TITLE_INPUT, ...TITLE_INPUT_FALLBACKS]);
-      const bodySel  = await waitForFirstVisible(page, [BODY_EDITOR, ...BODY_EDITOR_FALLBACKS]);
+      const titleSel = await retry(
+        () => waitForFirstVisible(page, [TITLE_INPUT, ...TITLE_INPUT_FALLBACKS]),
+        { attempts: 3, delayMs: 400 },
+      );
+      const bodySel = await retry(
+        () => waitForFirstVisible(page, [BODY_EDITOR, ...BODY_EDITOR_FALLBACKS]),
+        { attempts: 3, delayMs: 400 },
+      );
       console.log('Navigated to composer:', composeUrl);
       await humanPause();
+      logJson('substack', 'info', { ev: 'title_fill', safeSkip: flags.safeMode, selector: titleSel });
       console.log(`Typing title into: ${titleSel}`);
       if (flags.safeMode) {
         console.log('SAFE_MODE – skipping title fill');
@@ -76,6 +87,7 @@ export class SubstackDriver implements PlatformDriver {
         await page.click(titleSel);
         await page.fill(titleSel, input.title);
       }
+      logJson('substack', 'info', { ev: 'body_insert', safeSkip: flags.safeMode, selector: bodySel });
       console.log(`Inserting body HTML into: ${bodySel}`);
       if (flags.safeMode) {
         console.log('SAFE_MODE – skipping body HTML insertion');
@@ -164,6 +176,8 @@ export class SubstackDriver implements PlatformDriver {
       await humanPause();
       await saveAuthState(context);
       console.log('Saved Substack auth state to:', path.resolve(AUTH_PATH));
+      appendRun('substack-drafts', { id, editUrl, title: input.title ?? '', source: 'createDraft' });
+      logJson('substack', 'info', { ev: 'draft_created', id, editUrl, title: input.title ?? '' });
 
       return { id, editUrl };
     } finally {
@@ -182,9 +196,10 @@ export class SubstackDriver implements PlatformDriver {
     try {
       const page = await newPage(context);
       const composeUrl = `${env.SUBSTACK_PUBLICATION_URL}/publish/post`;
-      await page.goto(composeUrl);
+      await retry(() => page.goto(composeUrl), { attempts: 3, delayMs: 500 });
       await page.waitForLoadState('domcontentloaded');
       await dismissAnyModal(page);
+      logJson('substack', 'info', { ev: 'compose_opened', url: composeUrl });
       if (page.url().includes('/publish/home')) {
         const createBtn = await page.$(CREATE_NEW_BUTTON);
         if (createBtn) {
@@ -200,14 +215,15 @@ export class SubstackDriver implements PlatformDriver {
         // ignore
       }
       await page.waitForSelector('body', { state: 'visible', timeout: 10_000 });
-      const publishSel = await waitForFirstVisible(page, [
-        PUBLISH_BUTTON,
-        ...PUBLISH_BUTTON_FALLBACKS,
-      ]);
+      const publishSel = await retry(
+        () => waitForFirstVisible(page, [PUBLISH_BUTTON, ...PUBLISH_BUTTON_FALLBACKS]),
+        { attempts: 3, delayMs: 400 },
+      );
       console.log('Opened composer to publish draft', input.id);
       if (input.scheduleAt) {
         console.log('TODO: schedule publish at', input.scheduleAt);
       }
+      logJson('substack', 'info', { ev: 'publish_click', safeSkip: flags.safeMode, selector: publishSel });
       console.log('Clicking publish button via', publishSel);
       if (flags.safeMode) {
         console.log('SAFE_MODE – skipping publish click');
@@ -215,6 +231,7 @@ export class SubstackDriver implements PlatformDriver {
         await page.click(publishSel);
         await page.waitForTimeout(500);
       }
+      logJson('substack', 'info', { ev: 'publish_click', safeSkip: flags.safeMode, selector: publishSel });
       const publicUrl = page.url();
       console.log('Post published', publicUrl);
       await saveAuthState(context);

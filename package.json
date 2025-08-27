@@ -15,7 +15,9 @@
     "demo:medium:draft": "node --loader ts-node/esm src/cli/demo_medium_draft.ts",
     "auth:substack": "node --loader ts-node/esm src/cli/auth_substack.ts",
     "demo:substack:draft": "node --loader ts-node/esm src/cli/demo_substack.ts draft",
-    "demo:substack:publish": "node --loader ts-node/esm src/cli/demo_substack.ts publish"
+    "demo:substack:publish": "node --loader ts-node/esm src/cli/demo_substack.ts publish",
+    "agent:substack:write": "node --loader ts-node/esm src/cli/demo_substack.ts agent:write",
+    "runs:substack": "node --loader ts-node/esm src/cli/runs_substack.ts"
   },
   "dependencies": {
     "dotenv": "^17.2.1",
