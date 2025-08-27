@@ -4,12 +4,16 @@ export const PUBLISH_BUTTON_PRIMARY = 'button:has-text("Publish")';
 
 
 export const TITLE_INPUT_FALLBACKS = [
-  'textarea[aria-label="Title"]',
+  'div[contenteditable="true"][data-placeholder="Title"]',
+  'h1[contenteditable="true"]',
   '[data-testid="post-title"] textarea',
+  'textarea[aria-label="Title"]',
 ];
 
 export const BODY_EDITOR_FALLBACKS = [
-  '[data-testid="post-editor"] [contenteditable="true"]',
+  'div[contenteditable="true"][data-placeholder*="Start writing"]',
+  'div.ProseMirror[contenteditable="true"]',
+  '[data-lexical-editor] [contenteditable="true"]',
   '[role="textbox"][contenteditable="true"]',
 ];
 
@@ -17,6 +21,19 @@ export const PUBLISH_BUTTON_FALLBACKS = [
   '[data-testid="publish-button"]',
   'role=button[name=/^(Publish|Post)$/i]',
 ];
+
+
+export const DISMISS_MODAL_CANDIDATES = [
+  'button:has-text("Got it")',
+  'button:has-text("Got It")',
+  'button[aria-label="Close"]',
+  '[data-testid="modal-close"]',
+  'role=button[name=/^(Got it|Close)$/i]',
+];
+
+// Optional dashboard fallback to reach the composer
+export const CREATE_NEW_BUTTON = 'button:has-text("Create new")';
+export const CREATE_POST_MENU_ITEM = 'a:has-text("Post"), button:has-text("Post")';
 
 
 // Existing exports retained for backwards compatibility
