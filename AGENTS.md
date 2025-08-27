@@ -59,7 +59,9 @@ Configuration:
 - Set `AI_PROVIDER=groq` to use Groq by default.
 - Override per run with `--model groq`.
 
+
 ### Groq setup
 - Install SDK: `npm install groq-sdk`
 - Require `GROQ_API_KEY` in `.env`
 - Models: `llama3-groq-70b-tool-use-preview`, `llama3-groq-8b-tool-use-preview`
+
