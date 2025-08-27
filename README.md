@@ -76,6 +76,18 @@ npm run demo:substack:draft -- "Test Title" "<h1>Body</h1>"
 SUBSTACK_PUBLICATION_URL=https://yourpub.substack.com npm run demo:substack:publish -- draft_123
 ```
 
+```bash
+# AI draft (stub writer)
+npm run agent:substack:write -- "why newsletters still matter"
+
+# view saved draft artifacts
+npm run runs:substack
+```
+
+Behavior:
+- The agent writer uses a local stub (no API keys).
+- All created drafts are appended as JSONL to `playwright/.runs/substack-drafts.jsonl`.
+
 
 Set `SAFE_MODE=true` to log actions without modifying Substack.
 Set `SAFE_MODE=false` to attempt real actions (authentication required).
