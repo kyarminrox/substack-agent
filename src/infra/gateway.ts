@@ -1,50 +1,30 @@
-import type { AIRequest, AIResponse } from '../types/ai.js';
+import { resolveProvider } from '../infra/gateway.js';
+import { retry } from '../infra/retry.js';
+import { logJson } from '../infra/logger.js';
+import { appendRun } from '../infra/runs.js';
+import type { AIResponse } from '../types/ai.js';
 
-export interface Provider {
-  name: string;
-  generate(req: AIRequest): Promise<AIResponse>;
-}
+export type WriterInput = { topic: string; model?: string };
+export type WriterOutput = { title: string; html: string };
 
-class LocalProvider implements Provider {
-  name = 'local';
-  async generate(req: AIRequest): Promise<AIResponse> {
-    return { text: `Local stub for: ${req.prompt}`, meta: { provider: 'local' } };
-  }
-}
+export async function generateDraft({ topic, model }: WriterInput): Promise<WriterOutput> {
+  const provider = resolveProvider(model);
+  const req = { prompt: topic, model };
 
-class GroqProvider implements Provider {
-  name = 'groq';
-  async generate(req: AIRequest): Promise<AIResponse> {
-    // TODO: integrate Groq API later (llama3-groq-tool-use models).
-    return { text: `Groq stub for: ${req.prompt}`, meta: { provider: 'groq' } };
-  }
-}
+  const res: AIResponse = await retry(async () => {
+    logJson('ai', 'info', { provider: provider.name, model, prompt: topic });
+    return provider.generate(req);
+  });
 
-class OpenAIProvider implements Provider {
-  name = 'openai';
-  async generate(_req: AIRequest): Promise<AIResponse> {
-    throw new Error('not implemented');
-  }
-}
+  // Persist richer metadata if the provider returned an explicit model.
+  appendRun('writer', {
+    provider: provider.name,
+    model: (res.meta as { model?: string } | undefined)?.model ?? model,
+    prompt: topic,
+  });
 
-class ClaudeProvider implements Provider {
-  name = 'claude';
-  async generate(_req: AIRequest): Promise<AIResponse> {
-    throw new Error('not implemented');
-  }
-}
-
-export function resolveProvider(override?: string): Provider {
-  const name = (override || process.env.AI_PROVIDER || 'local').toLowerCase();
-  switch (name) {
-    case 'groq':
-      return new GroqProvider();
-    case 'openai':
-      return new OpenAIProvider();
-    case 'claude':
-      return new ClaudeProvider();
-    case 'local':
-    default:
-      return new LocalProvider();
-  }
+  const safe = topic.trim().replace(/\s+/g, ' ');
+  const title = safe.replace(/\b\w/g, (c) => c.toUpperCase());
+  const html = `<h1>${title}</h1>\n<p>${res.text}</p>`;
+  return { title, html };
 }

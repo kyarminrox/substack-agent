@@ -16,6 +16,7 @@ SUBSTACK_PUBLICATION_URL=
 SUBSTACK_HEADLESS=true
 SAFE_MODE=false
 MEDIUM_TOKEN=
+GROQ_API_KEY=
 ```
 - `SAFE_MODE` enables log-only mode to avoid writes.
 - `SUBSTACK_HEADLESS` controls whether Playwright runs without a browser UI.
@@ -57,3 +58,10 @@ MEDIUM_TOKEN=
 Configuration:
 - Set `AI_PROVIDER=groq` to use Groq by default.
 - Override per run with `--model groq`.
+
+
+### Groq setup
+- Install SDK: `npm install groq-sdk`
+- Require `GROQ_API_KEY` in `.env`
+- Models: `llama3-groq-70b-tool-use-preview`, `llama3-groq-8b-tool-use-preview`
+

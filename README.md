@@ -35,6 +35,7 @@ Environment
 
 - `MEDIUM_TOKEN` – Medium API token
 - `SUBSTACK_AUTH_DIR` – Playwright auth storage path
+- `GROQ_API_KEY` – Groq API key for AI gateway
 - See `.env.example`
 
 ### Substack (Playwright) setup
@@ -78,7 +79,11 @@ SUBSTACK_PUBLICATION_URL=https://yourpub.substack.com npm run demo:substack:publ
 
 ```bash
 # AI draft (Groq default)
+
+GROQ_API_KEY=sk_... AI_PROVIDER=groq npm run agent:substack:write -- "Topic"
+
 AI_PROVIDER=groq npm run agent:substack:write -- "Topic"
+
 
 # Local stub (no external calls)
 npm run agent:substack:write -- "Offline draft" --model local
