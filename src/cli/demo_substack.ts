@@ -2,15 +2,26 @@ import { SubstackDriver } from '../drivers/substack.driver.js';
 
 async function main() {
   if (process.argv[2] === 'agent:write') {
-    const topic = process.argv.slice(3).join(' ');
+    const args = process.argv.slice(3);
+    let model: string | undefined;
+    const topicParts: string[] = [];
+    for (let i = 0; i < args.length; i++) {
+      if (args[i] === '--model') {
+        model = args[i + 1];
+        i++;
+      } else {
+        topicParts.push(args[i]);
+      }
+    }
+    const topic = topicParts.join(' ');
     if (!topic) {
-      console.error('Usage: agent:write "<topic or prompt>"');
+      console.error('Usage: agent:write "<topic or prompt>" [--model <provider>]');
       process.exit(2);
     }
     const { generateDraft } = await import('../brains/writer.js');
     const { SubstackDriver } = await import('../drivers/substack.driver.js');
 
-    const draft = await generateDraft({ topic });
+    const draft = await generateDraft({ topic, model });
     const driver = new SubstackDriver();
     const res = await driver.createDraft({ title: draft.title, html: draft.html, tags: [] });
     console.log('AI draft created:', res.id, res.editUrl);
