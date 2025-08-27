@@ -77,15 +77,15 @@ SUBSTACK_PUBLICATION_URL=https://yourpub.substack.com npm run demo:substack:publ
 ```
 
 ```bash
-# AI draft (stub writer)
-npm run agent:substack:write -- "why newsletters still matter"
+# AI draft (Groq default)
+AI_PROVIDER=groq npm run agent:substack:write -- "Topic"
 
-# view saved draft artifacts
-npm run runs:substack
+# Local stub (no external calls)
+npm run agent:substack:write -- "Offline draft" --model local
 ```
 
 Behavior:
-- The agent writer uses a local stub (no API keys).
+- The agent writer uses a pluggable AI gateway (Groq recommended).
 - All created drafts are appended as JSONL to `playwright/.runs/substack-drafts.jsonl`.
 
 
