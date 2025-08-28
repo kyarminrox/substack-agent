@@ -75,6 +75,18 @@ npm run demo:substack:draft -- "Test Title" "<h1>Body</h1>"
 
 # publish an existing draft
 SUBSTACK_PUBLICATION_URL=https://yourpub.substack.com npm run demo:substack:publish -- draft_123
+
+# Publish the latest draft (web-only, no email)
+npm run demo:substack:publish
+
+# Publish a specific draft (web-only)
+npm run demo:substack:publish -- 172159950
+
+# Publish + email
+npm run demo:substack:publish -- 172159950 --email
+
+# Schedule instead of publish now (web-only)
+npm run demo:substack:publish -- 172159950 --schedule "2025-09-01T09:00"
 ```
 
 ```bash

@@ -41,6 +41,54 @@ export const TITLE_INPUT = TITLE_INPUT_PRIMARY;
 export const BODY_EDITOR = BODY_EDITOR_PRIMARY;
 export const PUBLISH_BUTTON = PUBLISH_BUTTON_PRIMARY;
 
+// Publish flow
+export const CONTINUE_BUTTON_PRIMARY = 'button:has-text("Continue")';
+export const CONTINUE_BUTTON_FALLBACKS = [
+  'role=button[name=/Continue/i]',
+  '[data-testid="continue-button"]',
+];
+
+export const PUBLISH_NOW_PRIMARY = 'button:has-text("Publish now")';
+export const PUBLISH_NOW_FALLBACKS = [
+  'role=button[name=/^(Publish now|Send|Post)$/i]',
+  '[data-testid="publish-button"]',
+];
+
+// Delivery: "Send via email and the Substack app"
+export const SEND_EMAIL_CHECKBOX_PRIMARY = 'label:has-text("Send via email and the Substack app") input[type="checkbox"]';
+export const SEND_EMAIL_CHECKBOX_FALLBACKS = [
+  'input[type="checkbox"][name="sendEmail"]',
+  'role=checkbox[name=/Send via email/i]',
+];
+
+// Title testing toggle (we want this OFF)
+export const TITLE_TESTING_TOGGLE_PRIMARY = 'label:has-text("Title testing") input[type="checkbox"]';
+export const TITLE_TESTING_TOGGLE_FALLBACKS = [
+  'role=switch[name=/Title testing/i]',
+  '[data-testid="title-test-toggle"] input[type="checkbox"]',
+];
+
+// Scheduling controls
+export const SCHEDULE_TOGGLE_PRIMARY = 'label:has-text("Schedule time to publish") input[type="checkbox"]';
+export const SCHEDULE_TOGGLE_FALLBACKS = [
+  'role=checkbox[name=/Schedule/i]',
+  '[data-testid="schedule-toggle"] input[type="checkbox"]',
+];
+export const SCHEDULE_DATE_INPUT = 'input[type="date"]';
+export const SCHEDULE_TIME_INPUT = 'input[type="time"]';
+export const SCHEDULE_CONFIRM_PRIMARY = 'button:has-text("Schedule")';
+export const SCHEDULE_CONFIRM_FALLBACKS = [
+  'role=button[name=/Schedule/i]',
+  '[data-testid="confirm-schedule"]',
+];
+
+// Back-compat aliases (optional)
+export const CONTINUE_BUTTON = CONTINUE_BUTTON_PRIMARY;
+export const PUBLISH_NOW = PUBLISH_NOW_PRIMARY;
+export const SEND_EMAIL_CHECKBOX = SEND_EMAIL_CHECKBOX_PRIMARY;
+export const TITLE_TESTING_TOGGLE = TITLE_TESTING_TOGGLE_PRIMARY;
+export const SCHEDULE_TOGGLE = SCHEDULE_TOGGLE_PRIMARY;
+
 // Utility to find the first visible selector from a list
 import type { Page } from 'playwright';
 
