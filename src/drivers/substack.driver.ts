@@ -11,9 +11,9 @@ import {
   BODY_EDITOR,
   BODY_EDITOR_FALLBACKS,
 } from '../infra/selectors/substack.js';
+import { PUBLISH_SCROLL_CANDIDATES, PUBLISH_FOOTER_ANCHOR, FINAL_PUBLISH_BTN_XPATH } from '../infra/selectors/substack.js';
 import {
   CONTINUE_BUTTON, CONTINUE_BUTTON_FALLBACKS,
-  PUBLISH_NOW, PUBLISH_NOW_FALLBACKS,
   SEND_EMAIL_CHECKBOX, SEND_EMAIL_CHECKBOX_FALLBACKS,
   TITLE_TESTING_TOGGLE, TITLE_TESTING_TOGGLE_FALLBACKS,
   SCHEDULE_TOGGLE, SCHEDULE_TOGGLE_FALLBACKS,
@@ -38,7 +38,67 @@ async function ensureCheckbox(
   }
 }
 
+async function safeClick(
+  page: import('playwright').Page,
+  target: string | import('playwright').Locator,
+  opts: { timeoutMs?: number; label?: string } = {},
+): Promise<void> {
+  const timeoutMs = opts.timeoutMs ?? 10_000;
+  const label = opts.label ?? 'click';
+  const loc = typeof target === 'string' ? page.locator(target) : target;
+
+  await loc.scrollIntoViewIfNeeded().catch(() => {});
+  try {
+    await loc.click({ trial: true, timeout: Math.min(3000, timeoutMs) });
+    await loc.click({ timeout: Math.min(4000, timeoutMs) });
+    return;
+  } catch {}
+
+  try {
+    await page.waitForTimeout(150);
+    await loc.evaluate((el: Element) => (el as HTMLElement).click());
+    return;
+  } catch {}
+
+  await loc.click({ force: true, timeout: timeoutMs });
+}
+
+function norm(s: string) { return s.toLowerCase().replace(/\s+/g, ' ').trim(); }
+
+function byRoleBtn(page: import('playwright').Page, name: RegExp) {
+  return page.getByRole('button', { name });
+}
+function byRoleChk(page: import('playwright').Page, name: RegExp) {
+  return page.getByRole('checkbox', { name });
+}
+
 const AUTH_PATH = path.join(env.SUBSTACK_AUTH_DIR, 'substack.json');
+
+async function ensurePublishBarVisible(page: import('playwright').Page): Promise<void> {
+  // Reset zoom to 100% to avoid sticky footer being off-screen
+  await page.evaluate(() => { (document.body as any).style.zoom = '1'; });
+  // Give Substack a tall viewport to ensure the footer can mount
+  try { await page.setViewportSize({ width: 1440, height: 1000 }); } catch {}
+  // Nudge layout so sticky observers fire
+  await page.evaluate(() => window.dispatchEvent(new Event('resize'))).catch(() => {});
+  // Scroll progressively to the bottom, pausing to let lazy UIs mount
+  for (let i = 0; i < 8; i++) {
+    await page.mouse.wheel(0, 1200);
+    await page.waitForTimeout(300);
+    // If the button exists and is visible, we’re done (no :has-text usage)
+    const barLocator = page
+      .getByRole('button', { name: /^(Publish now|Send to everyone now|Send to everyone in|Publish in)/i })
+      .or(page.locator('[data-testid="publish-button"]'))
+      .first();
+    const hasBar = await barLocator.isVisible().catch(() => false);
+    if (hasBar) return;
+  }
+  // Final attempt: jump to end and wiggle
+  await page.keyboard.press('End').catch(() => {});
+  await page.waitForTimeout(300);
+  await page.evaluate(() => window.scrollBy(0, -200)).catch(() => {});
+  await page.waitForTimeout(200);
+}
 
 export type PublishPostInput = {
   id?: string;              // legacy optional
@@ -46,6 +106,7 @@ export type PublishPostInput = {
   editUrl?: string;         // e.g. "https://yourpub.substack.com/publish/post/172159950"
   scheduleAt?: string | Date;
   sendEmail?: boolean;      // default false (web-only publish)
+  title?: string;           // optional for archive fallback matching
 };
 
 function extractPostId(editUrlOrId?: string): string | undefined {
@@ -243,13 +304,17 @@ export class SubstackDriver implements PlatformDriver {
       await page.waitForSelector('body', { state: 'visible', timeout: 10_000 });
       await retry(() => waitForFirstVisible(page, [BODY_EDITOR, ...BODY_EDITOR_FALLBACKS]), { attempts: 3 });
 
-      // Continue → Publish screen
-      const continueSel = await retry(
-        () => waitForFirstVisible(page, [CONTINUE_BUTTON, ...CONTINUE_BUTTON_FALLBACKS]),
-        { attempts: 3, delayMs: 400 },
-      );
-      logJson('substack', 'info', { ev: 'publish_continue', safeSkip: flags.safeMode, selector: continueSel });
-      if (!flags.safeMode) await page.click(continueSel);
+      // Continue → Publish screen (click once if present)
+      try {
+        const continueSel = await retry(
+          () => waitForFirstVisible(page, [CONTINUE_BUTTON, ...CONTINUE_BUTTON_FALLBACKS]),
+          { attempts: 2, delayMs: 300 },
+        );
+        if (!flags.safeMode) await page.click(continueSel);
+        await page.getByRole('heading', { name: /Publish/i }).waitFor({ timeout: 5000 }).catch(() => {});
+      } catch {
+        // If the publish panel is already open, continue button may not be present
+      }
 
       // Delivery: default to web-only (avoid accidental email)
       const sendEmailSel = await retry(
@@ -257,6 +322,8 @@ export class SubstackDriver implements PlatformDriver {
         { attempts: 2, delayMs: 300 },
       ).catch(() => undefined);
       if (sendEmailSel) {
+        const cb = page.locator(sendEmailSel);
+        await cb.scrollIntoViewIfNeeded().catch(() => {});
         logJson('substack', 'info', { ev: 'delivery_set', sendEmail: !!input.sendEmail });
         if (!flags.safeMode) await ensureCheckbox(page, sendEmailSel, !!input.sendEmail);
       }
@@ -278,6 +345,8 @@ export class SubstackDriver implements PlatformDriver {
           () => waitForFirstVisible(page, [SCHEDULE_TOGGLE, ...SCHEDULE_TOGGLE_FALLBACKS]),
           { attempts: 3, delayMs: 400 },
         );
+        const schedToggle = page.locator(scheduleToggleSel);
+        await schedToggle.scrollIntoViewIfNeeded().catch(() => {});
         if (!flags.safeMode) await ensureCheckbox(page, scheduleToggleSel, true);
 
         // best-effort date/time fill (some UIs use pickers)
@@ -299,23 +368,136 @@ export class SubstackDriver implements PlatformDriver {
           { attempts: 3, delayMs: 400 },
         );
         logJson('substack', 'info', { ev: 'schedule_confirm', when: at.toISOString(), selector: confirmSel });
-        if (!flags.safeMode) await page.click(confirmSel);
+        if (!flags.safeMode) await safeClick(page, confirmSel, { label: 'schedule_confirm' });
         scheduled = true;
       }
 
       // Publish now (if not scheduled)
       if (!scheduled) {
-        const publishSel = await retry(
-          () => waitForFirstVisible(page, [PUBLISH_NOW, ...PUBLISH_NOW_FALLBACKS]),
-          { attempts: 3, delayMs: 400 },
-        );
-        logJson('substack', 'info', { ev: 'publish_now_click', safeSkip: flags.safeMode, selector: publishSel });
-        if (!flags.safeMode) await page.click(publishSel);
+        // The publish dialog is a modal; its primary action lives inside it.
+        // OLD (too broad: matches multiple modals)
+        // const modal = page.locator('div[role="dialog"]');
+        // await modal.waitFor({ state: 'visible', timeout: 10_000 });
+
+        // NEW: target only the publish modal and the active instance
+        const modal = page.getByTestId('publish-modal').first();
+        await modal.waitFor({ state: 'visible', timeout: 10_000 });
+
+        // Ensure the inner panel is scrolled to reveal the footer buttons
+        const scrollable = modal.locator('div[class*="pc-overflow-auto"], .pc-overflow-auto');
+        if (await scrollable.count()) {
+          const el = scrollable.first();
+          await el.evaluate(e => { (e as HTMLElement).scrollTop = (e as HTMLElement).scrollHeight; });
+        }
+
+        // Primary publish button = visual primary in modal footer (no text assumption)
+        // Primary publish button inside THIS modal (no text assumptions)
+        const primaryBtn = modal.locator('button.priority_primary-RfbeYt').first();
+        await primaryBtn.waitFor({ state: 'visible', timeout: 10_000 });
+
+        // Pre-click debug
+        try { await page.screenshot({ path: `playwright/.runs/pre-publish-${Date.now()}.png`, fullPage: false }); } catch {}
+
+        // Click deterministically
+        if (!flags.safeMode) {
+          await safeClick(page, primaryBtn, { label: 'publish_primary' });
+        }
+
+        // --- Web-only publish nudge modal (second step) ---
+        try {
+          // The nudge appears only for web-only. We detect it by its buttons.
+          const webOnlyBtn = byRoleBtn(page, /Publish on web only/i);
+          const alsoEmailBtn = byRoleBtn(page, /Also send via email/i);
+
+          // Wait a short time for either of the nudge buttons to appear.
+          await Promise.race([
+            webOnlyBtn.waitFor({ state: 'visible', timeout: 2000 }),
+            alsoEmailBtn.waitFor({ state: 'visible', timeout: 2000 }),
+          ]);
+
+          // If it's there, optionally tick "Don't ask again" to avoid future prompts.
+          const dontAsk = byRoleChk(page, /don.?t ask again/i);
+          try {
+            await dontAsk.check({ force: true, trial: true });
+            await dontAsk.check({ force: true });
+          } catch {}
+
+          // Choose web-only to match sendEmail=false.
+          await safeClick(page, webOnlyBtn, { label: 'web_only_confirm' });
+          logJson('substack', 'info', { ev: 'web_only_nudge', action: 'publish_on_web_only' });
+        } catch {
+          // No nudge shown; continue.
+        }
+
+        const targetTitle = (await page.title().catch(() => input.postId || '')) || '';
+        const wanted = norm(input?.editUrl ? input.editUrl.split('/publish/post/')[0] || '' : '');
+
+        // Race: popup OR same-tab /p/ URL OR “View post” control
+        const popupPromise = context.waitForEvent('page', { timeout: 15000 }).catch(() => null);
+        const urlPromise   = page.waitForURL('**/p/**', { timeout: 15000 }).then(() => page).catch(() => null);
+        const viewBtn      = page.locator('a:has-text("View post"), button:has-text("View post")');
+        const viewPromise  = viewBtn.first().waitFor({ timeout: 12000 }).then(async () => {
+          await safeClick(page, viewBtn.first(), { label: 'open_view_post' });
+          return context.waitForEvent('page', { timeout: 10000 }).catch(() => null);
+        }).catch(() => null);
+
+        const winner = (await Promise.race([popupPromise, urlPromise, viewPromise])) as import('playwright').Page | null;
+        let publicUrl = '';
+        try {
+          const p = winner || page;
+          await p.waitForLoadState('domcontentloaded', { timeout: 8000 }).catch(() => {});
+          publicUrl = p.url();
+        } catch {}
+
+        // Extra DOM fallback: sometimes the editor injects a permalink element after publish.
+        if (publicUrl.includes('/publish/post/')) {
+          try {
+            const linkDom = await page.locator('a[href*="/p/"]').first();
+            await linkDom.waitFor({ state: 'visible', timeout: 2000 });
+            const href = await linkDom.getAttribute('href');
+            if (href) publicUrl = href;
+          } catch {}
+        }
+
+        // If we still don't have a /p/ permalink, try a strict archive match by title
+        if (!/\/p\//.test(publicUrl)) {
+          // Navigate to archive and search for exact title
+          const archiveUrl = `${env.SUBSTACK_PUBLICATION_URL}/archive`;
+          await page.goto(archiveUrl, { waitUntil: 'domcontentloaded' });
+          const cards = page.locator('a[href*="/p/"]');
+          const n = await cards.count();
+          let found = '';
+          for (let i = 0; i < n; i++) {
+            const a = cards.nth(i);
+            const t = norm(await a.textContent().catch(() => '') || '');
+            const wantTitle = norm(input?.title || '');
+            if (t && wantTitle && t === wantTitle) {
+              found = await a.getAttribute('href') || '';
+              break;
+            }
+          }
+          if (found) {
+            publicUrl = found.startsWith('http') ? found : `${env.SUBSTACK_BASE_URL}${found}`;
+          } else {
+            // No positive match — fail loudly (we keep screenshots)
+            try { await page.screenshot({ path: `playwright/.runs/post-publish-${Date.now()}.png`, fullPage: false }); } catch {}
+            throw new Error('Published click completed, but permalink could not be verified by /p/ navigation or archive title match.');
+          }
+        }
+
+        // Post-click debug
+        try { await page.screenshot({ path: `playwright/.runs/post-publish-${Date.now()+1}.png`, fullPage: false }); } catch {}
+
+        logJson('substack', 'info', { ev: 'published', publicUrl, btnText: 'primary_modal_button' });
+        appendRun('substack-published', { postId, publicUrl, title: input.title || '' });
+        await saveAuthState(context);
+        return { publicUrl };
       }
 
+      // If scheduled, fall back to previous handling (no immediate new tab expected)
       await page.waitForLoadState('networkidle').catch(() => {});
       const publicUrl = page.url();
-      logJson('substack', 'info', { ev: scheduled ? 'scheduled' : 'published', publicUrl });
+      logJson('substack', 'info', { ev: 'published', publicUrl });
 
       appendRun('substack-published', { postId, publicUrl, title: await page.title().catch(() => '') });
       await saveAuthState(context);

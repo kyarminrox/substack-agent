@@ -115,3 +115,15 @@ export async function waitForFirstVisible(
     `None of the selectors became visible within ${timeout}ms: ${selectors.join(', ')}`,
   );
 }
+
+// Footer publish area anchors
+// Broaden the scrollable container guess: any auto/scroll panes on the page
+export const PUBLISH_SCROLL_CANDIDATES = [
+  '.pc-overflow-auto',
+  '[class*="overflow-auto"]',
+  '[class*="scroll"]',
+  '[style*="overflow"]',
+].join(', ');
+export const PUBLISH_FOOTER_ANCHOR = 'input[data-track-input="publish_button_text"]';
+// Button immediately before the anchor (Cancel is 2nd before; Publish is 1st)
+export const FINAL_PUBLISH_BTN_XPATH = 'xpath=preceding-sibling::button[1]';
