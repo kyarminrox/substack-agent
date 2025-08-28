@@ -13,10 +13,16 @@ export async function generateDraft({ topic, model }: WriterInput): Promise<Writ
 
   const res: AIResponse = await retry(async () => {
     logJson('ai', 'info', { provider: provider.name, model, prompt: topic });
-    return provider.generate(req);
+    try {
+      return await provider.generate(req);
+    } catch (e: any) {
+      const code = e?.error?.code ?? e?.code;
+      // Break out of retry loop for permanent 4xx
+      if (code === 'model_not_found' || code === 'invalid_request_error') throw e;
+      throw e;
+    }
   });
 
-  // Persist richer metadata if the provider returned an explicit model.
   appendRun('writer', {
     provider: provider.name,
     model: (res.meta as { model?: string } | undefined)?.model ?? model,

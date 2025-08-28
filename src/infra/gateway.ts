@@ -25,21 +25,24 @@ class GroqProvider implements Provider {
   }
 
   async generate(req: AIRequest): Promise<AIResponse> {
-    const allowed = [
-      'llama3-groq-70b-tool-use-preview',
-      'llama3-groq-8b-tool-use-preview',
-    ];
-    const model = allowed.includes(String(req.model))
-      ? String(req.model)
-      : 'llama3-groq-8b-tool-use-preview';
+    // Respect explicit --model first, then env, then a sane default you have access to.
+    const model = (req.model ?? process.env.GROQ_MODEL ?? 'llama-3.1-8b-instant').trim();
 
-    const completion = await this.client.chat.completions.create({
-      model,
-      messages: [{ role: 'user', content: req.prompt }],
-    });
-
-    const text = completion.choices?.[0]?.message?.content ?? '';
-    return { text, meta: { provider: this.name, model } };
+    try {
+      const completion = await this.client.chat.completions.create({
+        model,
+        messages: [{ role: 'user', content: req.prompt }],
+      });
+      const text = completion.choices?.[0]?.message?.content ?? '';
+      return { text, meta: { provider: this.name, model } };
+    } catch (e: any) {
+      // Surface non-retryable model errors immediately (so our retry wrapper won't keep trying).
+      const code = e?.error?.code ?? e?.code;
+      if (code === 'model_not_found' || code === 'invalid_request_error') {
+        throw e;
+      }
+      throw e;
+    }
   }
 }
 
@@ -57,17 +60,20 @@ class ClaudeProvider implements Provider {
   }
 }
 
-/**
- * Resolve a provider by name or a model override.
- * - "groq" -> GroqProvider
- * - "local" -> LocalProvider
- * - "openai"/"claude" -> stubs
- * - Groq model ids (e.g., "llama3-groq-8b-tool-use-preview") -> GroqProvider
- */
 export function resolveProvider(override?: string): Provider {
   const name = (override || process.env.AI_PROVIDER || 'local').toLowerCase();
 
-  if (/^llama3-groq-/.test(name)) return new GroqProvider();
+  // Treat known Groq model IDs as Groq-backed.
+  const groqModels = new Set([
+    // older examples
+    'meta-llama/llama-4-scout-17b-16e-instruct',
+    'meta-llama/llama-4-maverick-17b-128e-instruct',
+    'deepset-r1-distill-llama-70b',
+    'llama-3.3-70b-versatile',
+    'llama-3.1-8b-instant',
+  ]);
+
+  if (groqModels.has(name)) return new GroqProvider();
 
   switch (name) {
     case 'groq':

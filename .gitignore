@@ -143,3 +143,7 @@ test-results/
 # Vite logs files
 vite.config.js.timestamp-*
 vite.config.ts.timestamp-*
+
+#IGNORE AUTH FILES AND RUN LOGS
+playwright/.auth/
+playwright/.runs/
