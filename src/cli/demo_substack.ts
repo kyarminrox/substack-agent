@@ -1,4 +1,40 @@
+import { readRuns } from '../infra/runs.js';
 import { SubstackDriver } from '../drivers/substack.driver.js';
+
+if (process.argv[2] === 'publish') {
+  const args = process.argv.slice(3);
+  let target: string | undefined;     // postId or editUrl
+  let scheduleAt: string | undefined;  // ISO string
+  let sendEmail = false;
+
+  for (let i = 0; i < args.length; i++) {
+    if (args[i] === '--schedule') { scheduleAt = args[i + 1]; i++; }
+    else if (args[i] === '--email') { sendEmail = true; }
+    else if (!target) { target = args[i]; }
+  }
+
+  const driver = new SubstackDriver();
+
+  if (!target) {
+    const items = readRuns('substack-drafts', 100);
+    const last = items.filter(x => (x as any).editUrl || (x as any).id).slice(-1)[0];
+    if (!last) {
+      console.error('No drafts found. Create one first.');
+      process.exit(2);
+    }
+    target = (last as any).editUrl || (last as any).postId;
+    console.log('Using last draft:', target);
+  }
+
+  const res = await driver.publishPost({
+    postId: target,
+    editUrl: target,
+    scheduleAt,
+    sendEmail,
+  });
+  console.log('Public URL:', res.publicUrl);
+  process.exit(0);
+}
 
 async function main() {
   if (process.argv[2] === 'agent:write') {
@@ -44,19 +80,10 @@ async function main() {
     if (out.editUrl) {
       console.log('Edit URL:', out.editUrl);
     }
-  } else if (cmd === 'publish') {
-    const id = process.argv[3];
-    if (!id) {
-      console.log('Usage: npm run demo:substack:publish -- <id>');
-      return;
-    }
-    await driver.ensureAuth();
-    const out = await driver.publishPost({ id });
-    console.log('Post published:', out.publicUrl);
   } else {
     console.log('Usage:');
     console.log('  npm run demo:substack:draft -- <title> <html>');
-    console.log('  npm run demo:substack:publish -- <id>');
+    console.log('  npm run demo:substack:publish -- [postId] [--email] [--schedule "ISO"]');
   }
 }
 

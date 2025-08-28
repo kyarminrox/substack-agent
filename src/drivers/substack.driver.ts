@@ -1,5 +1,5 @@
 import type { PlatformDriver } from './platformDriver.js';
-import type { PostDraftInput, PublishPostInput, NoteInput, Comment, Stats, StatsRange } from '../types/schemas.js';
+import type { PostDraftInput, NoteInput, Comment, Stats, StatsRange } from '../types/schemas.js';
 import { env, flags } from '../infra/config.js';
 import { openContext, newPage, saveAuthState, humanPause } from '../infra/playwright.js';
 import { retry } from '../infra/retry.js';
@@ -10,15 +10,51 @@ import {
   TITLE_INPUT_FALLBACKS,
   BODY_EDITOR,
   BODY_EDITOR_FALLBACKS,
-  PUBLISH_BUTTON,
-  PUBLISH_BUTTON_FALLBACKS,
+} from '../infra/selectors/substack.js';
+import {
+  CONTINUE_BUTTON, CONTINUE_BUTTON_FALLBACKS,
+  PUBLISH_NOW, PUBLISH_NOW_FALLBACKS,
+  SEND_EMAIL_CHECKBOX, SEND_EMAIL_CHECKBOX_FALLBACKS,
+  TITLE_TESTING_TOGGLE, TITLE_TESTING_TOGGLE_FALLBACKS,
+  SCHEDULE_TOGGLE, SCHEDULE_TOGGLE_FALLBACKS,
+  SCHEDULE_DATE_INPUT, SCHEDULE_TIME_INPUT,
+  SCHEDULE_CONFIRM_PRIMARY, SCHEDULE_CONFIRM_FALLBACKS,
   waitForFirstVisible,
 } from '../infra/selectors/substack.js';
-import { DISMISS_MODAL_CANDIDATES, CREATE_NEW_BUTTON, CREATE_POST_MENU_ITEM } from '../infra/selectors/substack.js';
+import { CREATE_NEW_BUTTON, CREATE_POST_MENU_ITEM } from '../infra/selectors/substack.js';
 import fs from 'node:fs';
 import path from 'node:path';
 
+async function ensureCheckbox(
+  page: import('playwright').Page,
+  selector: string,
+  desired: boolean,
+): Promise<void> {
+  const el = await page.$(selector);
+  if (!el) return;
+  const checked = await el.isChecked().catch(() => false);
+  if (checked !== desired) {
+    await el.click({ force: true });
+  }
+}
+
 const AUTH_PATH = path.join(env.SUBSTACK_AUTH_DIR, 'substack.json');
+
+export type PublishPostInput = {
+  id?: string;              // legacy optional
+  postId?: string;          // e.g. "172159950"
+  editUrl?: string;         // e.g. "https://yourpub.substack.com/publish/post/172159950"
+  scheduleAt?: string | Date;
+  sendEmail?: boolean;      // default false (web-only publish)
+};
+
+function extractPostId(editUrlOrId?: string): string | undefined {
+  if (!editUrlOrId) return undefined;
+  const m = editUrlOrId.match(/\/publish\/post\/(\d+)/);
+  if (m) return m[1];
+  if (/^\d+$/.test(editUrlOrId)) return editUrlOrId;
+  return undefined;
+}
 
 export class SubstackDriver implements PlatformDriver {
   readonly name = 'substack';
@@ -187,57 +223,102 @@ export class SubstackDriver implements PlatformDriver {
   }
 
   async publishPost(input: PublishPostInput): Promise<{ publicUrl: string }> {
-
     await this.ensureAuth();
     if (!env.SUBSTACK_PUBLICATION_URL) {
       throw new Error('SUBSTACK_PUBLICATION_URL not configured');
     }
+
+    const postId = extractPostId(input.postId ?? input.editUrl);
+    if (!postId) throw new Error('publishPost: require postId or editUrl containing /publish/post/{id}');
+
     const { browser, context } = await openContext();
     try {
       const page = await newPage(context);
-      const composeUrl = `${env.SUBSTACK_PUBLICATION_URL}/publish/post`;
-      await retry(() => page.goto(composeUrl), { attempts: 3, delayMs: 500 });
-      await page.waitForLoadState('domcontentloaded');
-      await dismissAnyModal(page);
-      logJson('substack', 'info', { ev: 'compose_opened', url: composeUrl });
-      if (page.url().includes('/publish/home')) {
-        const createBtn = await page.$(CREATE_NEW_BUTTON);
-        if (createBtn) {
-          await createBtn.click().catch(() => {});
-          await page.waitForSelector(CREATE_POST_MENU_ITEM, { timeout: 3000 }).catch(() => {});
-          const postItem = await page.$(CREATE_POST_MENU_ITEM);
-          if (postItem) await postItem.click().catch(() => {});
-        }
-      }
-      try {
-        await page.waitForLoadState('networkidle');
-      } catch {
-        // ignore
-      }
+      const editUrl = `${env.SUBSTACK_PUBLICATION_URL}/publish/post/${postId}`;
+
+      await retry(() => page.goto(editUrl), { attempts: 3, delayMs: 500 });
+      logJson('substack', 'info', { ev: 'publish_open', editUrl });
+
+      // Ensure editor exists
       await page.waitForSelector('body', { state: 'visible', timeout: 10_000 });
-      const publishSel = await retry(
-        () => waitForFirstVisible(page, [PUBLISH_BUTTON, ...PUBLISH_BUTTON_FALLBACKS]),
+      await retry(() => waitForFirstVisible(page, [BODY_EDITOR, ...BODY_EDITOR_FALLBACKS]), { attempts: 3 });
+
+      // Continue → Publish screen
+      const continueSel = await retry(
+        () => waitForFirstVisible(page, [CONTINUE_BUTTON, ...CONTINUE_BUTTON_FALLBACKS]),
         { attempts: 3, delayMs: 400 },
       );
-      console.log('Opened composer to publish draft', input.id);
+      logJson('substack', 'info', { ev: 'publish_continue', safeSkip: flags.safeMode, selector: continueSel });
+      if (!flags.safeMode) await page.click(continueSel);
+
+      // Delivery: default to web-only (avoid accidental email)
+      const sendEmailSel = await retry(
+        () => waitForFirstVisible(page, [SEND_EMAIL_CHECKBOX, ...SEND_EMAIL_CHECKBOX_FALLBACKS]),
+        { attempts: 2, delayMs: 300 },
+      ).catch(() => undefined);
+      if (sendEmailSel) {
+        logJson('substack', 'info', { ev: 'delivery_set', sendEmail: !!input.sendEmail });
+        if (!flags.safeMode) await ensureCheckbox(page, sendEmailSel, !!input.sendEmail);
+      }
+
+      // Title testing → OFF
+      const titleTestSel = await retry(
+        () => waitForFirstVisible(page, [TITLE_TESTING_TOGGLE, ...TITLE_TESTING_TOGGLE_FALLBACKS]),
+        { attempts: 2, delayMs: 300 },
+      ).catch(() => undefined);
+      if (titleTestSel && !flags.safeMode) await ensureCheckbox(page, titleTestSel, false);
+
+      // Optional schedule
+      let scheduled = false;
       if (input.scheduleAt) {
-        console.log('TODO: schedule publish at', input.scheduleAt);
+        const at = typeof input.scheduleAt === 'string' ? new Date(input.scheduleAt) : input.scheduleAt;
+        if (isNaN(at.getTime())) throw new Error('scheduleAt is not a valid date');
+
+        const scheduleToggleSel = await retry(
+          () => waitForFirstVisible(page, [SCHEDULE_TOGGLE, ...SCHEDULE_TOGGLE_FALLBACKS]),
+          { attempts: 3, delayMs: 400 },
+        );
+        if (!flags.safeMode) await ensureCheckbox(page, scheduleToggleSel, true);
+
+        // best-effort date/time fill (some UIs use pickers)
+        const yyyy = String(at.getFullYear()).padStart(4, '0');
+        const mm = String(at.getMonth() + 1).padStart(2, '0');
+        const dd = String(at.getDate()).padStart(2, '0');
+        const HH = String(at.getHours()).padStart(2, '0');
+        const MM = String(at.getMinutes()).padStart(2, '0');
+
+        const dateInput = await page.$(SCHEDULE_DATE_INPUT);
+        const timeInput = await page.$(SCHEDULE_TIME_INPUT);
+        if (!flags.safeMode) {
+          if (dateInput) await dateInput.fill(`${yyyy}-${mm}-${dd}`);
+          if (timeInput) await timeInput.fill(`${HH}:${MM}`);
+        }
+
+        const confirmSel = await retry(
+          () => waitForFirstVisible(page, [SCHEDULE_CONFIRM_PRIMARY, ...SCHEDULE_CONFIRM_FALLBACKS]),
+          { attempts: 3, delayMs: 400 },
+        );
+        logJson('substack', 'info', { ev: 'schedule_confirm', when: at.toISOString(), selector: confirmSel });
+        if (!flags.safeMode) await page.click(confirmSel);
+        scheduled = true;
       }
-      logJson('substack', 'info', { ev: 'publish_click', safeSkip: flags.safeMode, selector: publishSel });
-      console.log('Clicking publish button via', publishSel);
-      if (flags.safeMode) {
-        console.log('SAFE_MODE – skipping publish click');
-      } else {
-        await page.click(publishSel);
-        await page.waitForTimeout(500);
+
+      // Publish now (if not scheduled)
+      if (!scheduled) {
+        const publishSel = await retry(
+          () => waitForFirstVisible(page, [PUBLISH_NOW, ...PUBLISH_NOW_FALLBACKS]),
+          { attempts: 3, delayMs: 400 },
+        );
+        logJson('substack', 'info', { ev: 'publish_now_click', safeSkip: flags.safeMode, selector: publishSel });
+        if (!flags.safeMode) await page.click(publishSel);
       }
-      logJson('substack', 'info', { ev: 'publish_click', safeSkip: flags.safeMode, selector: publishSel });
+
+      await page.waitForLoadState('networkidle').catch(() => {});
       const publicUrl = page.url();
-      console.log('Post published', publicUrl);
+      logJson('substack', 'info', { ev: scheduled ? 'scheduled' : 'published', publicUrl });
+
+      appendRun('substack-published', { postId, publicUrl, title: await page.title().catch(() => '') });
       await saveAuthState(context);
-
-      console.log('Saved Substack auth state to:', path.resolve(AUTH_PATH));
-
       return { publicUrl };
     } finally {
       await context.close();
@@ -266,13 +347,3 @@ export class SubstackDriver implements PlatformDriver {
   }
 }
 
-async function dismissAnyModal(page: import('playwright').Page) {
-  for (const sel of DISMISS_MODAL_CANDIDATES) {
-    const el = await page.$(sel);
-    if (el) {
-      await el.click().catch(() => {});
-      await page.waitForTimeout(300);
-      break;
-    }
-  }
-}
