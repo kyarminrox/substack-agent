@@ -14,6 +14,8 @@ export async function openContext(): Promise<{ browser: Browser; context: Browse
   const context = await browser.newContext({
     ...(ctxOptions.storageState ? { storageState: ctxOptions.storageState } : {}),
     permissions: ['clipboard-read', 'clipboard-write'],
+    viewport: { width: 1366, height: 900 },
+    deviceScaleFactor: 1,
   });
   return { browser, context };
 }

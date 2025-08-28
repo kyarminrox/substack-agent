@@ -139,6 +139,8 @@ dist
 playwright/.auth
 playwright-report/
 test-results/
+playwright/.runs/*.png
+playwright/.runs/*.jsonl
 
 # Vite logs files
 vite.config.js.timestamp-*

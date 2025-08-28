@@ -64,6 +64,16 @@ Environment flags:
 
 Selectors used by the Substack driver live in `src/infra/selectors/substack.ts`. If Substack updates their UI, these selectors may need revisions.
 
+Publish nudge behavior
+
+- When publishing web-only (no email), Substack may show a confirmation modal with “Publish on web only” and “Also send via email,” plus an optional “Don’t ask again.” The agent automatically confirms “Publish on web only” to match the default (no `--email`). If you pass `--email`, the driver configures delivery to include email and this nudge should not appear.
+
+Runs & Artifacts
+
+- JSONL runs: the agent writes append-only logs to `playwright/.runs/*.jsonl` (e.g., `substack-drafts.jsonl`, `substack-published.jsonl`). Each line is a single JSON event for easy parsing and audit.
+- Screenshots: publish flow saves debug images to `playwright/.runs/*.png` (e.g., `pre-publish-*.png`, `post-publish-*.png`). These help verify the visible state before/after publish.
+- Git hygiene: `.gitignore` excludes these files to avoid committing local artifacts.
+
 ### Demos
 
 ```bash
