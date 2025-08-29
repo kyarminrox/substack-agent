@@ -95,6 +95,12 @@ npm run demo:substack:publish -- 172159950
 # Publish + email
 npm run demo:substack:publish -- 172159950 --email
 
+### Schedule a post (web-only)
+
+```bash
+SUBSTACK_HEADLESS=false SAFE_MODE=false \
+npm run demo:substack:schedule -- <postId> --schedule "YYYY-MM-DDTHH:MM:00"
+
 # Schedule instead of publish now (web-only)
 npm run demo:substack:publish -- 172159950 --schedule "2025-09-01T09:00"
 ```

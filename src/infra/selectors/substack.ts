@@ -52,6 +52,8 @@ export const PUBLISH_NOW_PRIMARY = 'button:has-text("Publish now")';
 export const PUBLISH_NOW_FALLBACKS = [
   'role=button[name=/^(Publish now|Send|Post)$/i]',
   '[data-testid="publish-button"]',
+  'button:has-text("Publish in")',
+  'button:has-text("Send to everyone in")',
 ];
 
 // Delivery: "Send via email and the Substack app"
@@ -69,25 +71,21 @@ export const TITLE_TESTING_TOGGLE_FALLBACKS = [
 ];
 
 // Scheduling controls
-export const SCHEDULE_TOGGLE_PRIMARY = 'label:has-text("Schedule time to publish") input[type="checkbox"]';
-export const SCHEDULE_TOGGLE_FALLBACKS = [
-  'role=checkbox[name=/Schedule/i]',
-  '[data-testid="schedule-toggle"] input[type="checkbox"]',
-];
-export const SCHEDULE_DATE_INPUT = 'input[type="date"]';
-export const SCHEDULE_TIME_INPUT = 'input[type="time"]';
-export const SCHEDULE_CONFIRM_PRIMARY = 'button:has-text("Schedule")';
-export const SCHEDULE_CONFIRM_FALLBACKS = [
-  'role=button[name=/Schedule/i]',
-  '[data-testid="confirm-schedule"]',
-];
+// Scheduling controls (no explicit confirm button on current UI)
+export const SCHEDULE_SECTION = 'section:has-text("Schedule time to publish"), div:has-text("Schedule time to publish")';
+export const SCHEDULE_TOGGLE  = 'input[type="checkbox"]:near(:text("Schedule time to publish"))';
+export const SCHEDULE_DT      = 'input[type="datetime-local"]';
+export const SCHEDULE_DATE    = 'input[type="date"]';
+export const SCHEDULE_TIME    = 'input[type="time"]';
+// Calendar button fallback (optional)
+export const SCHEDULE_CAL_BTN = 'button:has([data-icon="calendar"]), button[aria-label*="calendar"], button:has-text("Schedule")';
 
 // Back-compat aliases (optional)
 export const CONTINUE_BUTTON = CONTINUE_BUTTON_PRIMARY;
 export const PUBLISH_NOW = PUBLISH_NOW_PRIMARY;
 export const SEND_EMAIL_CHECKBOX = SEND_EMAIL_CHECKBOX_PRIMARY;
 export const TITLE_TESTING_TOGGLE = TITLE_TESTING_TOGGLE_PRIMARY;
-export const SCHEDULE_TOGGLE = SCHEDULE_TOGGLE_PRIMARY;
+// SCHEDULE_TOGGLE now points to near() based selector above
 
 // Utility to find the first visible selector from a list
 import type { Page } from 'playwright';

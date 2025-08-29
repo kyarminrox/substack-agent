@@ -16,9 +16,12 @@ import {
   CONTINUE_BUTTON, CONTINUE_BUTTON_FALLBACKS,
   SEND_EMAIL_CHECKBOX, SEND_EMAIL_CHECKBOX_FALLBACKS,
   TITLE_TESTING_TOGGLE, TITLE_TESTING_TOGGLE_FALLBACKS,
-  SCHEDULE_TOGGLE, SCHEDULE_TOGGLE_FALLBACKS,
-  SCHEDULE_DATE_INPUT, SCHEDULE_TIME_INPUT,
-  SCHEDULE_CONFIRM_PRIMARY, SCHEDULE_CONFIRM_FALLBACKS,
+  SCHEDULE_SECTION,
+  SCHEDULE_TOGGLE,
+  SCHEDULE_DT,
+  SCHEDULE_DATE,
+  SCHEDULE_TIME,
+  SCHEDULE_CAL_BTN,
   waitForFirstVisible,
 } from '../infra/selectors/substack.js';
 import { CREATE_NEW_BUTTON, CREATE_POST_MENU_ITEM } from '../infra/selectors/substack.js';
@@ -335,73 +338,97 @@ export class SubstackDriver implements PlatformDriver {
       ).catch(() => undefined);
       if (titleTestSel && !flags.safeMode) await ensureCheckbox(page, titleTestSel, false);
 
-      // Optional schedule
+      // Optional schedule: enable and fill time inputs. Afterwards, the bottom-right button text reflects scheduling.
       let scheduled = false;
+      let btnText = '';
+      let publishSel = '';
       if (input.scheduleAt) {
         const at = typeof input.scheduleAt === 'string' ? new Date(input.scheduleAt) : input.scheduleAt;
         if (isNaN(at.getTime())) throw new Error('scheduleAt is not a valid date');
 
+        const yyyy = String(at.getFullYear()).padStart(4, '0');
+        const mm   = String(at.getMonth() + 1).padStart(2, '0');
+        const dd   = String(at.getDate()).padStart(2, '0');
+        const HH   = String(at.getHours()).padStart(2, '0');
+        const MM   = String(at.getMinutes()).padStart(2, '0');
+
+        // Optionally scroll the schedule section into view
+        const schedSection = await page.$(SCHEDULE_SECTION).catch(() => null);
+        if (schedSection) await schedSection.scrollIntoViewIfNeeded().catch(() => {});
+
+        // Enable schedule
         const scheduleToggleSel = await retry(
-          () => waitForFirstVisible(page, [SCHEDULE_TOGGLE, ...SCHEDULE_TOGGLE_FALLBACKS]),
+          () => waitForFirstVisible(page, [SCHEDULE_TOGGLE]),
           { attempts: 3, delayMs: 400 },
         );
-        const schedToggle = page.locator(scheduleToggleSel);
-        await schedToggle.scrollIntoViewIfNeeded().catch(() => {});
         if (!flags.safeMode) await ensureCheckbox(page, scheduleToggleSel, true);
 
-        // best-effort date/time fill (some UIs use pickers)
-        const yyyy = String(at.getFullYear()).padStart(4, '0');
-        const mm = String(at.getMonth() + 1).padStart(2, '0');
-        const dd = String(at.getDate()).padStart(2, '0');
-        const HH = String(at.getHours()).padStart(2, '0');
-        const MM = String(at.getMinutes()).padStart(2, '0');
+        // Try to fill inputs in this order
+        const attemptFill = async (): Promise<boolean> => {
+          const dt = await page.locator(SCHEDULE_DT).first();
+          const hasDt = await dt.isVisible().catch(() => false);
+          const hasDate = !!(await page.$(SCHEDULE_DATE));
+          const hasTime = !!(await page.$(SCHEDULE_TIME));
+          logJson('substack', 'info', { ev: 'schedule_inputs_present', present: { dt: hasDt, date: hasDate, time: hasTime } });
+          if (flags.safeMode) return hasDt || hasDate || hasTime;
+          try {
+            if (hasDt) {
+              await page.fill(SCHEDULE_DT, `${yyyy}-${mm}-${dd}T${HH}:${MM}`);
+              logJson('substack', 'info', { ev: 'schedule_fill', when: at.toISOString() });
+              return true;
+            }
+            let filled = false;
+            const dateEl = await page.$(SCHEDULE_DATE);
+            if (dateEl) { await dateEl.fill(`${yyyy}-${mm}-${dd}`); filled = true; }
+            const timeEl = await page.$(SCHEDULE_TIME);
+            if (timeEl) { await timeEl.fill(`${HH}:${MM}`); filled = true; }
+            if (filled) {
+              logJson('substack', 'info', { ev: 'schedule_fill', when: at.toISOString() });
+            }
+            return filled;
+          } catch {
+            return false;
+          }
+        };
 
-        const dateInput = await page.$(SCHEDULE_DATE_INPUT);
-        const timeInput = await page.$(SCHEDULE_TIME_INPUT);
-        if (!flags.safeMode) {
-          if (dateInput) await dateInput.fill(`${yyyy}-${mm}-${dd}`);
-          if (timeInput) await timeInput.fill(`${HH}:${MM}`);
+        let ok = await attemptFill();
+        if (!ok) {
+          // try to reveal inputs via calendar button
+          try { await safeClick(page, SCHEDULE_CAL_BTN, { label: 'open_calendar' }); } catch {}
+          ok = await attemptFill();
         }
 
-        const confirmSel = await retry(
-          () => waitForFirstVisible(page, [SCHEDULE_CONFIRM_PRIMARY, ...SCHEDULE_CONFIRM_FALLBACKS]),
-          { attempts: 3, delayMs: 400 },
-        );
-        logJson('substack', 'info', { ev: 'schedule_confirm', when: at.toISOString(), selector: confirmSel });
-        if (!flags.safeMode) await safeClick(page, confirmSel, { label: 'schedule_confirm' });
+        // After filling, wait for the bottom-right button to reflect scheduling
+        const publishCandidates = [
+          'button:has-text("Publish in")',
+          'button:has-text("Send to everyone in")',
+          '[data-testid="publish-button"]',
+          'button:has-text("Publish now")',
+        ];
+        publishSel = await retry(() => waitForFirstVisible(page, publishCandidates), { attempts: 5, delayMs: 400 });
+        btnText = await page.locator(publishSel).innerText().catch(() => '');
         scheduled = true;
       }
 
-      // Publish now (if not scheduled)
-      if (!scheduled) {
-        // The publish dialog is a modal; its primary action lives inside it.
-        // OLD (too broad: matches multiple modals)
-        // const modal = page.locator('div[role="dialog"]');
-        // await modal.waitFor({ state: 'visible', timeout: 10_000 });
+      // Pre-click debug before final publish action
+      try { await page.screenshot({ path: `playwright/.runs/pre-publish-${Date.now()}.png`, fullPage: false }); } catch {}
 
-        // NEW: target only the publish modal and the active instance
-        const modal = page.getByTestId('publish-modal').first();
-        await modal.waitFor({ state: 'visible', timeout: 10_000 });
+      // Find publish button if not derived from scheduling block
+      if (!publishSel) {
+        const publishCandidates = [
+          'button:has-text("Publish in")',
+          'button:has-text("Send to everyone in")',
+          '[data-testid="publish-button"]',
+          'button:has-text("Publish now")',
+        ];
+        publishSel = await retry(() => waitForFirstVisible(page, publishCandidates), { attempts: 5, delayMs: 400 });
+        btnText = await page.locator(publishSel).innerText().catch(() => '');
+      }
 
-        // Ensure the inner panel is scrolled to reveal the footer buttons
-        const scrollable = modal.locator('div[class*="pc-overflow-auto"], .pc-overflow-auto');
-        if (await scrollable.count()) {
-          const el = scrollable.first();
-          await el.evaluate(e => { (e as HTMLElement).scrollTop = (e as HTMLElement).scrollHeight; });
-        }
-
-        // Primary publish button = visual primary in modal footer (no text assumption)
-        // Primary publish button inside THIS modal (no text assumptions)
-        const primaryBtn = modal.locator('button.priority_primary-RfbeYt').first();
-        await primaryBtn.waitFor({ state: 'visible', timeout: 10_000 });
-
-        // Pre-click debug
-        try { await page.screenshot({ path: `playwright/.runs/pre-publish-${Date.now()}.png`, fullPage: false }); } catch {}
-
-        // Click deterministically
-        if (!flags.safeMode) {
-          await safeClick(page, primaryBtn, { label: 'publish_primary' });
-        }
+      // Click deterministically
+      if (!flags.safeMode) {
+        await safeClick(page, publishSel, { label: 'publish_primary' });
+      }
 
         // --- Web-only publish nudge modal (second step) ---
         try {
@@ -441,65 +468,67 @@ export class SubstackDriver implements PlatformDriver {
           return context.waitForEvent('page', { timeout: 10000 }).catch(() => null);
         }).catch(() => null);
 
-        const winner = (await Promise.race([popupPromise, urlPromise, viewPromise])) as import('playwright').Page | null;
-        let publicUrl = '';
+      const winner = (await Promise.race([popupPromise, urlPromise, viewPromise])) as import('playwright').Page | null;
+      let publicUrl = '';
+      try {
+        const p = winner || page;
+        await p.waitForLoadState('domcontentloaded', { timeout: 8000 }).catch(() => {});
+        publicUrl = p.url();
+      } catch {}
+
+      // Extra DOM fallback: sometimes the editor injects a permalink element after publish.
+      if (publicUrl.includes('/publish/post/')) {
         try {
-          const p = winner || page;
-          await p.waitForLoadState('domcontentloaded', { timeout: 8000 }).catch(() => {});
-          publicUrl = p.url();
+          const linkDom = await page.locator('a[href*="/p/"]').first();
+          await linkDom.waitFor({ state: 'visible', timeout: 2000 });
+          const href = await linkDom.getAttribute('href');
+          if (href) publicUrl = href;
         } catch {}
-
-        // Extra DOM fallback: sometimes the editor injects a permalink element after publish.
-        if (publicUrl.includes('/publish/post/')) {
-          try {
-            const linkDom = await page.locator('a[href*="/p/"]').first();
-            await linkDom.waitFor({ state: 'visible', timeout: 2000 });
-            const href = await linkDom.getAttribute('href');
-            if (href) publicUrl = href;
-          } catch {}
-        }
-
-        // If we still don't have a /p/ permalink, try a strict archive match by title
-        if (!/\/p\//.test(publicUrl)) {
-          // Navigate to archive and search for exact title
-          const archiveUrl = `${env.SUBSTACK_PUBLICATION_URL}/archive`;
-          await page.goto(archiveUrl, { waitUntil: 'domcontentloaded' });
-          const cards = page.locator('a[href*="/p/"]');
-          const n = await cards.count();
-          let found = '';
-          for (let i = 0; i < n; i++) {
-            const a = cards.nth(i);
-            const t = norm(await a.textContent().catch(() => '') || '');
-            const wantTitle = norm(input?.title || '');
-            if (t && wantTitle && t === wantTitle) {
-              found = await a.getAttribute('href') || '';
-              break;
-            }
-          }
-          if (found) {
-            publicUrl = found.startsWith('http') ? found : `${env.SUBSTACK_BASE_URL}${found}`;
-          } else {
-            // No positive match — fail loudly (we keep screenshots)
-            try { await page.screenshot({ path: `playwright/.runs/post-publish-${Date.now()}.png`, fullPage: false }); } catch {}
-            throw new Error('Published click completed, but permalink could not be verified by /p/ navigation or archive title match.');
-          }
-        }
-
-        // Post-click debug
-        try { await page.screenshot({ path: `playwright/.runs/post-publish-${Date.now()+1}.png`, fullPage: false }); } catch {}
-
-        logJson('substack', 'info', { ev: 'published', publicUrl, btnText: 'primary_modal_button' });
-        appendRun('substack-published', { postId, publicUrl, title: input.title || '' });
-        await saveAuthState(context);
-        return { publicUrl };
       }
 
-      // If scheduled, fall back to previous handling (no immediate new tab expected)
-      await page.waitForLoadState('networkidle').catch(() => {});
-      const publicUrl = page.url();
-      logJson('substack', 'info', { ev: 'published', publicUrl });
+      // If scheduled and we land on publish home (no immediate permalink), treat as scheduled success
+      if (scheduled && !/\/p\//.test(publicUrl)) {
+        const urlAfter = page.url();
+        if (/\/publish\/home/.test(urlAfter) || /\/publish\//.test(urlAfter)) {
+          logJson('substack', 'info', { ev: 'scheduled', when: (input.scheduleAt instanceof Date ? input.scheduleAt.toISOString() : new Date(input.scheduleAt as any).toISOString()), btnText });
+          appendRun('substack-scheduled', { postId, when: (input.scheduleAt instanceof Date ? input.scheduleAt.toISOString() : new Date(input.scheduleAt as any).toISOString()), editUrl, btnText });
+          try { await page.screenshot({ path: `playwright/.runs/post-publish-${Date.now()+1}.png`, fullPage: false }); } catch {}
+          await saveAuthState(context);
+          return { publicUrl: editUrl };
+        }
+      }
 
-      appendRun('substack-published', { postId, publicUrl, title: await page.title().catch(() => '') });
+      // If we still don't have a /p/ permalink, try a strict archive match by title
+      if (!/\/p\//.test(publicUrl)) {
+        // Navigate to archive and search for exact title
+        const archiveUrl = `${env.SUBSTACK_PUBLICATION_URL}/archive`;
+        await page.goto(archiveUrl, { waitUntil: 'domcontentloaded' });
+        const cards = page.locator('a[href*="/p/"]');
+        const n = await cards.count();
+        let found = '';
+        for (let i = 0; i < n; i++) {
+          const a = cards.nth(i);
+          const t = norm(await a.textContent().catch(() => '') || '');
+          const wantTitle = norm(input?.title || '');
+          if (t && wantTitle && t === wantTitle) {
+            found = await a.getAttribute('href') || '';
+            break;
+          }
+        }
+        if (found) {
+          publicUrl = found.startsWith('http') ? found : `${env.SUBSTACK_BASE_URL}${found}`;
+        } else {
+          // No positive match — fail loudly (we keep screenshots)
+          try { await page.screenshot({ path: `playwright/.runs/post-publish-${Date.now()}.png`, fullPage: false }); } catch {}
+          throw new Error('Published click completed, but permalink could not be verified by /p/ navigation or archive title match.');
+        }
+      }
+
+      // Post-click debug
+      try { await page.screenshot({ path: `playwright/.runs/post-publish-${Date.now()+1}.png`, fullPage: false }); } catch {}
+
+      logJson('substack', 'info', { ev: 'published', publicUrl, btnText });
+      appendRun('substack-published', { postId, publicUrl, title: input.title || '' });
       await saveAuthState(context);
       return { publicUrl };
     } finally {
