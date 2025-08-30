@@ -5,6 +5,7 @@ import { openContext, newPage, saveAuthState, humanPause } from '../infra/playwr
 import { retry } from '../infra/retry.js';
 import { logJson } from '../infra/logger.js';
 import { appendRun } from '../infra/runs.js';
+import { getLastRun } from '../infra/runs.js';
 import {
   TITLE_INPUT,
   TITLE_INPUT_FALLBACKS,
@@ -128,6 +129,338 @@ export class SubstackDriver implements PlatformDriver {
       throw new Error(
         `No Substack auth found at ${path.resolve(AUTH_PATH)}. Run: npm run auth:substack`,
       );
+    }
+  }
+
+  async updateLastDraftHtml(input: { html: string; title?: string; force?: boolean }): Promise<{ editUrl: string }> {
+    await this.ensureAuth();
+    const { browser, context } = await openContext();
+    try {
+      const page = await newPage(context);
+      const last = getLastRun('substack-drafts');
+      if (!last?.editUrl) {
+        throw new Error('No previous draft found to update. Create a draft first.');
+      }
+      const target = last.editUrl;
+      await retry(() => page.goto(target), { attempts: 3, delayMs: 500 });
+
+      // Ensure editor exists
+      await page.waitForSelector('body', { state: 'visible', timeout: 10_000 });
+      const titleSel = await retry(
+        () => waitForFirstVisible(page, [TITLE_INPUT, ...TITLE_INPUT_FALLBACKS]),
+        { attempts: 3, delayMs: 400 },
+      );
+      const bodySel = await retry(
+        () => waitForFirstVisible(page, [BODY_EDITOR, ...BODY_EDITOR_FALLBACKS]),
+        { attempts: 3, delayMs: 400 },
+      );
+
+      // Multi-session block: visible banner or persistent "Saving..." before input
+      try {
+        const hint = page.locator('text=/another window|open elsewhere|unsaved changes/i').first();
+        const hintVisible = await hint.isVisible({ timeout: 500 }).catch(() => false);
+        let persistentSaving = false;
+        try {
+          const saving = page.locator('text=/Saving/i').first();
+          const seen = await saving.isVisible({ timeout: 500 }).catch(() => false);
+          if (seen) {
+            await page.waitForTimeout(3000);
+            persistentSaving = await saving.isVisible().catch(() => false);
+          }
+        } catch {}
+        if ((hintVisible || persistentSaving) && !input.force) {
+          logJson('substack', 'warn', { ev: 'multi_session_block' });
+          throw new Error('Possible multi-session editor open. Close other tabs or pass --force-inplace.');
+        }
+      } catch {}
+
+      // Screenshot before paste
+      try { await page.screenshot({ path: `playwright/.runs/update-pre-${Date.now()}.png`, fullPage: false }); } catch {}
+
+      // Clear body
+      await page.click(bodySel);
+      const mod = process.platform === 'darwin' ? 'Meta' : 'Control';
+      await page.keyboard.down(mod);
+      await page.keyboard.press('KeyA');
+      await page.keyboard.up(mod);
+      await page.keyboard.press('Backspace');
+      await page.waitForTimeout(150);
+      await page.evaluate((sel: string) => {
+        const el = document.querySelector(sel);
+        if (el) el.textContent = '';
+      }, bodySel).catch(() => {});
+      await page.waitForFunction((sel: string) => {
+        const el = document.querySelector(sel);
+        return !!el && !(el.textContent && el.textContent.trim().length > 0);
+      }, bodySel).catch(() => {});
+
+      // Paste new HTML (with fallbacks)
+      const doPaste = async () => {
+        let inserted = false;
+        try {
+          await page.evaluate(async (html: string) => {
+            const plain = html.replace(/<[^>]+>/g, ' ');
+            const item = new ClipboardItem({
+              'text/html': new Blob([html], { type: 'text/html' }),
+              'text/plain': new Blob([plain], { type: 'text/plain' }),
+            });
+            await navigator.clipboard.write([item]);
+          }, input.html);
+          await page.keyboard.down(mod);
+          await page.keyboard.press('KeyV');
+          await page.keyboard.up(mod);
+          inserted = true;
+        } catch {}
+        if (!inserted) {
+          try {
+            await page.evaluate(({ html, sel }: { html: string; sel: string }) => {
+              const root = document.querySelector(sel) as HTMLElement | null;
+              if (!root) throw new Error('editor not found');
+              const range = document.createRange();
+              range.selectNodeContents(root);
+              range.collapse(true);
+              const seln = window.getSelection();
+              seln?.removeAllRanges();
+              seln?.addRange(range);
+              document.execCommand('insertHTML', false, html);
+            }, { html: input.html, sel: bodySel });
+            inserted = true;
+          } catch {}
+        }
+        if (!inserted) {
+          await page.type(bodySel, input.html.replace(/<[^>]+>/g, ' '));
+        }
+      };
+
+      const nudgeAndSave = async () => {
+        // Emit input event
+        await page.keyboard.type(' ');
+        await page.keyboard.press('Backspace');
+        // Blur editor by focusing title, then the page body
+        await page.click(titleSel, { delay: 50 });
+        await page.click('body', { delay: 50 });
+        // Wait for autosave UI OR network quiet
+        try {
+          await page.waitForSelector('text=/Saved/i', { timeout: 7000 });
+        } catch {
+          await page.waitForLoadState('networkidle', { timeout: 4000 }).catch(() => {});
+        }
+        logJson('substack', 'info', { ev: 'draft_saved' });
+      };
+
+      const pasteCycle = async () => {
+        await doPaste();
+        await nudgeAndSave();
+      };
+
+      // Compose sentinel-appended HTML
+      const sentinel = new Date().toISOString();
+      const htmlWithSentinel = `${input.html}\n<p><span data-ss-sentinel="${sentinel}"></span></p>`;
+      // Swap input.html temporarily during paste cycles
+      const originalHtml = input.html;
+      (input as any).html = htmlWithSentinel;
+      await pasteCycle();
+
+      // If replacing the title, do it now and save again
+      if (input.title) {
+        await page.click(titleSel);
+        await page.keyboard.down(mod);
+        await page.keyboard.press('KeyA');
+        await page.keyboard.up(mod);
+        await page.fill(titleSel, input.title);
+        await nudgeAndSave();
+      }
+
+      // Screenshot after paste + saved
+      try { await page.screenshot({ path: `playwright/.runs/update-post-${Date.now()}.png`, fullPage: false }); } catch {}
+
+      // Replace title if provided
+      // Reload verification cycle (require non-empty content; sentinel best-effort)
+      const verifyAfterReload = async (): Promise<number> => {
+        await page.reload({ waitUntil: 'domcontentloaded' });
+        await page.waitForSelector(bodySel, { state: 'visible', timeout: 8000 });
+        const len = await page.evaluate((sel: string) => (document.querySelector(sel)?.textContent ?? '').trim().length, bodySel).catch(() => 0);
+        return Number(len) || 0;
+      };
+
+      let length = await verifyAfterReload();
+      const hasSentinel = async () => !!(await page.$('[data-ss-sentinel]'));
+      let sentPresent = await hasSentinel();
+      const MIN_LEN = 1;
+      if (length < MIN_LEN) {
+        // Retry one full cycle: clear → paste → save → reload
+        await page.click(bodySel);
+        await page.keyboard.down(mod);
+        await page.keyboard.press('KeyA');
+        await page.keyboard.up(mod);
+        await page.keyboard.press('Backspace');
+        await page.waitForTimeout(120);
+        await pasteCycle();
+        if (input.title) await nudgeAndSave();
+        length = await verifyAfterReload();
+        sentPresent = await hasSentinel();
+      }
+      if (length < MIN_LEN) {
+        try { await page.screenshot({ path: `playwright/.runs/update-reload-fail-${Date.now()}.png`, fullPage: false }); } catch {}
+        throw new Error('In-place update did not persist after reload.');
+      }
+      if (!sentPresent) {
+        logJson('substack', 'warn', { ev: 'sentinel_missing_same_tab' });
+      }
+      logJson('substack', 'info', { ev: 'draft_verified_same_tab', length, sentinel: sentPresent });
+
+      // Screenshot after reload verification
+      try { await page.screenshot({ path: `playwright/.runs/update-reload-${Date.now()+1}.png`, fullPage: false }); } catch {}
+      try { await page.screenshot({ path: `playwright/.runs/update-verified-${Date.now()}.png`, fullPage: false }); } catch {}
+
+      const editUrl = page.url();
+      let chars = await page.evaluate((sel: string) => (document.querySelector(sel)?.textContent ?? '').trim().length, bodySel).catch(() => 0);
+      logJson('substack', 'info', { ev: 'draft_updated', editUrl, chars });
+      await saveAuthState(context);
+
+      // Fresh-context verification to defeat dueling autosaves
+      const freshCheck = async (label: 'fresh' | 'fresh-retry'): Promise<number> => {
+        const fresh = await openContext();
+        try {
+          const p2 = await newPage(fresh.context);
+          await retry(() => p2.goto(editUrl), { attempts: 3, delayMs: 500 });
+          await p2.waitForSelector('body', { state: 'visible', timeout: 10_000 });
+          const bodySel2 = await retry(
+            () => waitForFirstVisible(p2, [BODY_EDITOR, ...BODY_EDITOR_FALLBACKS]),
+            { attempts: 3, delayMs: 400 },
+          );
+          // Optional multi-session hint
+          try {
+            const hint = p2.locator('text=/another window|unsaved changes/i').first();
+            if (await hint.isVisible({ timeout: 500 }).catch(() => false)) {
+              logJson('substack', 'warn', { ev: 'multi_session_hint' });
+            }
+          } catch {}
+          const len = await p2.evaluate((sel: string) => (document.querySelector(sel)?.textContent ?? '').trim().length, bodySel2).catch(() => 0);
+          const snap = label === 'fresh' ? 'update-fresh' : 'update-fresh-retry';
+          try { await p2.screenshot({ path: `playwright/.runs/${snap}-${Date.now()}.png`, fullPage: false }); } catch {}
+          return Number(len) || 0;
+        } finally {
+          try { await fresh.context.close(); } catch {}
+          try { await fresh.browser.close(); } catch {}
+        }
+      };
+
+      // Fresh-context verification of sentinel + length
+      // Close current page to simulate a new session load
+      try { await page.close(); } catch {}
+      const fresh = await openContext();
+      let freshLen = 0;
+      try {
+        const p2 = await newPage(fresh.context);
+        await retry(() => p2.goto(editUrl), { attempts: 3, delayMs: 500 });
+        await p2.waitForSelector('body', { state: 'visible', timeout: 10_000 });
+        const bodySel2 = await retry(() => waitForFirstVisible(p2, [BODY_EDITOR, ...BODY_EDITOR_FALLBACKS]), { attempts: 3, delayMs: 400 });
+        const hasSent2 = !!(await p2.$('[data-ss-sentinel]'));
+        freshLen = await p2.evaluate((sel: string) => (document.querySelector(sel)?.textContent ?? '').trim().length, bodySel2).catch(() => 0) as number;
+        try { await p2.screenshot({ path: `playwright/.runs/update-fresh-${Date.now()}.png`, fullPage: false }); } catch {}
+        const MIN_LEN = 1;
+        if (freshLen < MIN_LEN) {
+          logJson('substack', 'warn', { ev: 'verify_fresh_failed' });
+          // Redo once in original context
+          const rp = await newPage(context);
+          await retry(() => rp.goto(editUrl), { attempts: 3, delayMs: 500 });
+          await rp.waitForSelector('body', { state: 'visible', timeout: 10_000 });
+          const tSel = await retry(() => waitForFirstVisible(rp, [TITLE_INPUT, ...TITLE_INPUT_FALLBACKS]), { attempts: 3, delayMs: 400 });
+          const bSel = await retry(() => waitForFirstVisible(rp, [BODY_EDITOR, ...BODY_EDITOR_FALLBACKS]), { attempts: 3, delayMs: 400 });
+          const modX = process.platform === 'darwin' ? 'Meta' : 'Control';
+          await rp.click(bSel);
+          await rp.keyboard.down(modX); await rp.keyboard.press('KeyA'); await rp.keyboard.up(modX);
+          await rp.keyboard.press('Backspace');
+          await rp.waitForTimeout(120);
+          // Re-paste sentinel HTML
+          let insertedX = false;
+          try {
+            await rp.evaluate(async (html: string) => {
+              const plain = html.replace(/<[^>]+>/g, ' ');
+              const item = new ClipboardItem({ 'text/html': new Blob([html], { type: 'text/html' }), 'text/plain': new Blob([plain], { type: 'text/plain' }) });
+              await navigator.clipboard.write([item]);
+            }, htmlWithSentinel);
+            await rp.keyboard.down(modX); await rp.keyboard.press('KeyV'); await rp.keyboard.up(modX);
+            insertedX = true;
+          } catch {}
+          if (!insertedX) {
+            try {
+              await rp.evaluate(({ html, sel }: { html: string; sel: string }) => {
+                const root = document.querySelector(sel) as HTMLElement | null;
+                if (!root) throw new Error('editor not found');
+                const range = document.createRange();
+                range.selectNodeContents(root);
+                range.collapse(true);
+                const seln = window.getSelection();
+                seln?.removeAllRanges();
+                seln?.addRange(range);
+                document.execCommand('insertHTML', false, html);
+              }, { html: htmlWithSentinel, sel: bSel });
+              insertedX = true;
+            } catch {}
+          }
+          if (!insertedX) {
+            await rp.type(bSel, htmlWithSentinel.replace(/<[^>]+>/g, ' '));
+          }
+          await rp.keyboard.type(' ');
+          await rp.keyboard.press('Backspace');
+          await rp.click(tSel, { delay: 50 });
+          await rp.click('body', { delay: 50 });
+          try { await rp.locator('text=/Saved/i').first().waitFor({ timeout: 7000 }); } catch { await rp.waitForLoadState('networkidle', { timeout: 4000 }).catch(() => {}); }
+          try { await rp.close(); } catch {}
+
+          // Re-verify fresh
+          const p3 = await newPage(fresh.context);
+          await retry(() => p3.goto(editUrl), { attempts: 3, delayMs: 500 });
+          await p3.waitForSelector('body', { state: 'visible', timeout: 10_000 });
+          const bodySel3 = await retry(() => waitForFirstVisible(p3, [BODY_EDITOR, ...BODY_EDITOR_FALLBACKS]), { attempts: 3, delayMs: 400 });
+          const hasSent3 = !!(await p3.$('[data-ss-sentinel]'));
+          freshLen = await p3.evaluate((sel: string) => (document.querySelector(sel)?.textContent ?? '').trim().length, bodySel3).catch(() => 0) as number;
+          try { await p3.screenshot({ path: `playwright/.runs/update-fresh-retry-${Date.now()}.png`, fullPage: false }); } catch {}
+          if (freshLen < MIN_LEN) {
+            logJson('substack', 'warn', { ev: 'verify_fresh_failed' });
+            throw new Error('In-place update did not persist in a fresh context.');
+          }
+        }
+        logJson('substack', 'info', { ev: 'verify_fresh_ok', length: freshLen });
+
+        // Remove sentinel in fresh context and save (only if present)
+        const hadSent = !!(await p2.$('[data-ss-sentinel]'));
+        if (hadSent) {
+          await p2.evaluate(() => { document.querySelectorAll('[data-ss-sentinel]').forEach(n => n.remove()); });
+          // Save nudge
+          const t2 = await retry(() => waitForFirstVisible(p2, [TITLE_INPUT, ...TITLE_INPUT_FALLBACKS]), { attempts: 3, delayMs: 400 });
+          await p2.click(t2, { delay: 50 });
+          await p2.click('body', { delay: 50 });
+          await p2.keyboard.type(' ');
+          await p2.keyboard.press('Backspace');
+          try { await p2.locator('text=/Saved/i').first().waitFor({ timeout: 7000 }); } catch { await p2.waitForLoadState('networkidle', { timeout: 4000 }).catch(() => {}); }
+          // Reload and verify sentinel removed
+          await p2.reload({ waitUntil: 'domcontentloaded' });
+          await retry(() => waitForFirstVisible(p2, [BODY_EDITOR, ...BODY_EDITOR_FALLBACKS]), { attempts: 3, delayMs: 400 });
+          const sentGone = !(await p2.$('[data-ss-sentinel]'));
+          const finalLen = await p2.evaluate((sel: string) => (document.querySelector(sel)?.textContent ?? '').trim().length, bodySel2).catch(() => 0) as number;
+          if (!sentGone || finalLen < MIN_LEN) {
+            throw new Error('Sentinel removal failed or content too short after final reload.');
+          }
+          logJson('substack', 'info', { ev: 'sentinel_removed' });
+          logJson('substack', 'info', { ev: 'draft_updated_final', editUrl, chars: finalLen });
+        } else {
+          logJson('substack', 'info', { ev: 'sentinel_not_present_skip' });
+          const finalLen = freshLen;
+          logJson('substack', 'info', { ev: 'draft_updated_final', editUrl, chars: finalLen, sentinelPresent: false });
+        }
+      } finally {
+        try { await fresh.context.close(); } catch {}
+        try { await fresh.browser.close(); } catch {}
+      }
+      // Restore original html (safety)
+      (input as any).html = originalHtml;
+      return { editUrl };
+    } finally {
+      await context.close();
+      await browser.close();
     }
   }
 

@@ -22,3 +22,14 @@ export function readRuns(fileBase: string, max = 50): Array<RunMeta> {
   const lines = fs.readFileSync(filePath, 'utf8').trim().split('\n').filter(Boolean);
   return lines.slice(-max).map(l => JSON.parse(l));
 }
+
+export function getLastRun(kind: 'substack-drafts'): { editUrl?: string } | undefined {
+  try {
+    const items = readRuns(kind, 200);
+    const last = items.slice(-1)[0] as any;
+    if (!last) return undefined;
+    return { editUrl: last.editUrl };
+  } catch {
+    return undefined;
+  }
+}
