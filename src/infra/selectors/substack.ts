@@ -125,3 +125,7 @@ export const PUBLISH_SCROLL_CANDIDATES = [
 export const PUBLISH_FOOTER_ANCHOR = 'input[data-track-input="publish_button_text"]';
 // Button immediately before the anchor (Cancel is 2nd before; Publish is 1st)
 export const FINAL_PUBLISH_BTN_XPATH = 'xpath=preceding-sibling::button[1]';
+
+// Save state badges
+export const SAVED_BADGE = 'text=/Saved/i';
+export const SAVING_BADGE = 'text=/Saving/i';
