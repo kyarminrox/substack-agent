@@ -67,7 +67,7 @@ async function safeClick(
   await loc.click({ force: true, timeout: timeoutMs });
 }
 
-function norm(s: string) { return s.toLowerCase().replace(/\s+/g, ' ').trim(); }
+function norm(s: string) { return (s || '').toLowerCase().replace(/\s+/g, ' ').trim(); }
 
 function byRoleBtn(page: import('playwright').Page, name: RegExp) {
   return page.getByRole('button', { name });
@@ -261,20 +261,11 @@ export class SubstackDriver implements PlatformDriver {
       (input as any).html = htmlWithSentinel;
       await pasteCycle();
 
-      // If replacing the title, do it now and save again
-      if (input.title) {
-        await page.click(titleSel);
-        await page.keyboard.down(mod);
-        await page.keyboard.press('KeyA');
-        await page.keyboard.up(mod);
-        await page.fill(titleSel, input.title);
-        await nudgeAndSave();
-      }
+      // (Title will be handled after body verification)
 
       // Screenshot after paste + saved
       try { await page.screenshot({ path: `playwright/.runs/update-post-${Date.now()}.png`, fullPage: false }); } catch {}
 
-      // Replace title if provided
       // Reload verification cycle (require non-empty content; sentinel best-effort)
       const verifyAfterReload = async (): Promise<number> => {
         await page.reload({ waitUntil: 'domcontentloaded' });
@@ -312,6 +303,83 @@ export class SubstackDriver implements PlatformDriver {
       // Screenshot after reload verification
       try { await page.screenshot({ path: `playwright/.runs/update-reload-${Date.now()+1}.png`, fullPage: false }); } catch {}
       try { await page.screenshot({ path: `playwright/.runs/update-verified-${Date.now()}.png`, fullPage: false }); } catch {}
+
+      // Title Update block (guarded)
+      if (input.title) {
+        if (flags.safeMode) {
+          logJson('substack', 'info', { ev: 'draft_title_skip_safe_mode' });
+        } else {
+          // Re-resolve selector after reloads
+          const titleSel2 = await retry(
+            () => waitForFirstVisible(page, [TITLE_INPUT, ...TITLE_INPUT_FALLBACKS]),
+            { attempts: 3, delayMs: 400 },
+          );
+
+          const before = await page.inputValue(titleSel2).catch(() => '');
+          if (norm(before) !== norm(input.title)) {
+            const ts = Date.now();
+            try { await page.screenshot({ path: `playwright/.runs/title-pre-${ts}.png`, fullPage: false }); } catch {}
+
+            const modKey = process.platform === 'darwin' ? 'Meta' : 'Control';
+            await page.focus(titleSel2);
+            await page.keyboard.down(modKey);
+            await page.keyboard.press('KeyA');
+            await page.keyboard.up(modKey);
+            await page.keyboard.press('Backspace');
+
+            try {
+              await page.fill(titleSel2, input.title);
+            } catch {
+              await page.type(titleSel2, input.title);
+            }
+
+            // Save nudge: space/backspace and blur/focus
+            await page.keyboard.type(' ');
+            await page.keyboard.press('Backspace');
+            await page.click(bodySel, { delay: 50 }).catch(() => {});
+            await page.click(titleSel2, { delay: 50 }).catch(() => {});
+            try {
+              await page.waitForSelector('text=/Saved/i', { timeout: 7000 });
+            } catch {
+              await page.waitForLoadState('networkidle', { timeout: 4000 }).catch(() => {});
+            }
+            logJson('substack', 'info', { ev: 'draft_title_saved' });
+            try { await page.screenshot({ path: `playwright/.runs/title-post-${Date.now()}.png`, fullPage: false }); } catch {}
+
+            // Same-tab verify
+            await page.reload({ waitUntil: 'domcontentloaded' });
+            const vSel = await retry(
+              () => waitForFirstVisible(page, [TITLE_INPUT, ...TITLE_INPUT_FALLBACKS]),
+              { attempts: 3, delayMs: 400 },
+            );
+            const after1 = await page.inputValue(vSel).catch(() => '');
+            logJson('substack', 'info', { ev: 'draft_title_verify_same_tab', value: after1 });
+            if (norm(after1) !== norm(input.title)) {
+              // One retry: clear → fill → save → reload → recheck
+              await page.focus(vSel);
+              await page.keyboard.down(modKey);
+              await page.keyboard.press('KeyA');
+              await page.keyboard.up(modKey);
+              await page.keyboard.press('Backspace');
+              try { await page.fill(vSel, input.title); } catch { await page.type(vSel, input.title); }
+              await page.keyboard.type(' ');
+              await page.keyboard.press('Backspace');
+              await page.click(bodySel, { delay: 50 }).catch(() => {});
+              await page.click(vSel, { delay: 50 }).catch(() => {});
+              try { await page.waitForSelector('text=/Saved/i', { timeout: 7000 }); } catch { await page.waitForLoadState('networkidle', { timeout: 4000 }).catch(() => {}); }
+              await page.reload({ waitUntil: 'domcontentloaded' });
+              const vSel2 = await retry(() => waitForFirstVisible(page, [TITLE_INPUT, ...TITLE_INPUT_FALLBACKS]), { attempts: 3, delayMs: 400 });
+              const after2 = await page.inputValue(vSel2).catch(() => '');
+              logJson('substack', 'info', { ev: 'draft_title_verify_same_tab', value: after2 });
+              if (norm(after2) !== norm(input.title)) {
+                throw new Error('Title did not persist after reload');
+              }
+            }
+            logJson('substack', 'info', { ev: 'draft_title_verified_same_tab' });
+            try { await page.screenshot({ path: `playwright/.runs/title-verified-${Date.now()}.png`, fullPage: false }); } catch {}
+          }
+        }
+      }
 
       const editUrl = page.url();
       let chars = await page.evaluate((sel: string) => (document.querySelector(sel)?.textContent ?? '').trim().length, bodySel).catch(() => 0);
@@ -359,6 +427,48 @@ export class SubstackDriver implements PlatformDriver {
         const hasSent2 = !!(await p2.$('[data-ss-sentinel]'));
         freshLen = await p2.evaluate((sel: string) => (document.querySelector(sel)?.textContent ?? '').trim().length, bodySel2).catch(() => 0) as number;
         try { await p2.screenshot({ path: `playwright/.runs/update-fresh-${Date.now()}.png`, fullPage: false }); } catch {}
+        // Fresh-context title verification and one repair pass if needed
+        if (input.title && !flags.safeMode) {
+          try {
+            const tSel2 = await retry(() => waitForFirstVisible(p2, [TITLE_INPUT, ...TITLE_INPUT_FALLBACKS]), { attempts: 3, delayMs: 400 });
+            let freshTitle = await p2.inputValue(tSel2).catch(() => '');
+            logJson('substack', 'info', { ev: 'draft_title_verify_fresh', value: freshTitle });
+            try { await p2.screenshot({ path: `playwright/.runs/title-fresh-${Date.now()}.png`, fullPage: false }); } catch {}
+            if (norm(freshTitle) !== norm(input.title)) {
+              // Repair in original context
+              const tSelMain = await retry(() => waitForFirstVisible(page, [TITLE_INPUT, ...TITLE_INPUT_FALLBACKS]), { attempts: 3, delayMs: 400 });
+              const modKey = process.platform === 'darwin' ? 'Meta' : 'Control';
+              await page.focus(tSelMain);
+              await page.keyboard.down(modKey); await page.keyboard.press('KeyA'); await page.keyboard.up(modKey);
+              await page.keyboard.press('Backspace');
+              try { await page.fill(tSelMain, input.title); } catch { await page.type(tSelMain, input.title); }
+              await page.keyboard.type(' ');
+              await page.keyboard.press('Backspace');
+              await page.click(bodySel, { delay: 50 }).catch(() => {});
+              await page.click(tSelMain, { delay: 50 }).catch(() => {});
+              try { await page.waitForSelector('text=/Saved/i', { timeout: 7000 }); } catch { await page.waitForLoadState('networkidle', { timeout: 4000 }).catch(() => {}); }
+
+              // Re-check in a new fresh context
+              const fresh2 = await openContext();
+              try {
+                const p4 = await newPage(fresh2.context);
+                await retry(() => p4.goto(editUrl), { attempts: 3, delayMs: 500 });
+                await p4.waitForSelector('body', { state: 'visible', timeout: 10_000 });
+                const tSel4 = await retry(() => waitForFirstVisible(p4, [TITLE_INPUT, ...TITLE_INPUT_FALLBACKS]), { attempts: 3, delayMs: 400 });
+                freshTitle = await p4.inputValue(tSel4).catch(() => '');
+                logJson('substack', 'info', { ev: 'draft_title_verify_fresh', value: freshTitle });
+                try { await p4.screenshot({ path: `playwright/.runs/title-fresh-${Date.now()}.png`, fullPage: false }); } catch {}
+                if (norm(freshTitle) !== norm(input.title)) {
+                  throw new Error('Title did not persist in fresh context');
+                }
+              } finally {
+                try { await fresh2.context.close(); } catch {}
+                try { await fresh2.browser.close(); } catch {}
+              }
+            }
+            logJson('substack', 'info', { ev: 'draft_title_verified_fresh' });
+          } catch {}
+        }
         const MIN_LEN = 1;
         if (freshLen < MIN_LEN) {
           logJson('substack', 'warn', { ev: 'verify_fresh_failed' });
@@ -446,10 +556,16 @@ export class SubstackDriver implements PlatformDriver {
           }
           logJson('substack', 'info', { ev: 'sentinel_removed' });
           logJson('substack', 'info', { ev: 'draft_updated_final', editUrl, chars: finalLen });
+          if (input.title) {
+            logJson('substack', 'info', { ev: 'draft_update_final_with_title', editUrl, title: input.title });
+          }
         } else {
           logJson('substack', 'info', { ev: 'sentinel_not_present_skip' });
           const finalLen = freshLen;
           logJson('substack', 'info', { ev: 'draft_updated_final', editUrl, chars: finalLen, sentinelPresent: false });
+          if (input.title) {
+            logJson('substack', 'info', { ev: 'draft_update_final_with_title', editUrl, title: input.title });
+          }
         }
       } finally {
         try { await fresh.context.close(); } catch {}
