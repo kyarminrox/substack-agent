@@ -47,3 +47,28 @@ This list captures follow‑ups and future features. Each item includes a brief 
 - Criteria:
   - Readme section links directly to the file with a short “how to update” guide.
 
+## 9) Steps / Progress UI (+ tabs)
+- Scope: Upgrade `substack-ui` to a tabbed interface (Answer | Steps | Logs). Stream live progress as steps while drafting/publishing.
+- Design:
+  - Tabs across the top; Answer shows assistant text + tool results cards; Steps shows a timeline grouped by phase (AI writing, Substack actions); Logs shows raw JSON for debugging.
+- Server:
+  - Switch route to `createUIMessageStream` and `createUIMessageStreamResponse`.
+  - Emit `data-step` parts at each milestone: `{ id, phase, label, status: 'pending|in_progress|success|error', ts }`.
+  - Merge with `streamText().toUIMessageStream()` so LLM output still streams.
+- Client:
+  - `useChat({ onData })` updates a Steps store for transient parts; also render persistent `data-step` parts from `message.parts`.
+  - Timeline component renders chips (phase), dot indicators for status, and collapsible detail.
+- Criteria:
+  - While drafting, user sees “Open composer → Fill title → Insert body → Verify content → Save draft” advancing in real time.
+  - On completion, Steps shows all green checks and “Draft created” card in Answer tab.
+
+## 10) Transient toasts + progress bar
+- Scope: Use transient `data-notification` parts to show toasts and a top progress bar during long operations.
+- Criteria:
+  - Toasts for “Opening Substack”, “Inserting content”, “Saving draft”.
+  - Progress bar reaches 100% on `draft_created`.
+
+## 11) UI component library & theming
+- Scope: Adopt shadcn/ui + Tailwind to modernize layout (cards, tabs, timeline, toasts), add dark/light theme.
+- Criteria:
+  - New UI launched with tabs; responsive layout; copy buttons and external link icons.
