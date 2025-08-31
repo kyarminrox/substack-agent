@@ -72,3 +72,79 @@ This list captures follow‑ups and future features. Each item includes a brief 
 - Scope: Adopt shadcn/ui + Tailwind to modernize layout (cards, tabs, timeline, toasts), add dark/light theme.
 - Criteria:
   - New UI launched with tabs; responsive layout; copy buttons and external link icons.
+
+---
+
+## 12) Cloud SaaS Rollout (Multi‑Tenant)
+- Scope: Ship a secure, multi‑tenant hosted service with auth, quotas, and job execution.
+- Plan:
+  - Auth: Auth.js (NextAuth) with email magic link/OAuth2; optional TOTP for publish.
+  - Tenants: users↔tenants RBAC (owner/admin/member); all queries scoped by `tenant_id`.
+  - Rate limits: per‑tenant + per‑IP (burst + sustained); reject with friendly error.
+  - API: `/api/publications`, `/api/jobs`, `/api/jobs/{id}/events` (SSE), `/api/me`.
+  - DB: Postgres (Neon/RDS) with `users`, `tenants`, `publications`, `jobs`, `runs` tables.
+  - Storage: S3 for encrypted Playwright storageState, screenshots, JSONL runs.
+  - Queue: SQS (or Pub/Sub) for job dispatch; DLQ for failures.
+  - Billing (phase 2): Stripe subscriptions; quotas per plan.
+- Criteria:
+  - End‑to‑end draft/update/publish works for two different tenants concurrently.
+  - No cross‑tenant data leakage (verified by tests + manual checks).
+  - Rate limits enforced (429 with helpful message).
+
+## 13) Playwright Worker Service (K8s/ECS)
+- Scope: Containerized worker that executes Substack jobs reliably at scale.
+- Design:
+  - Docker image FROM `mcr.microsoft/playwright:lts` + Node 18.
+  - K8s Deployment: 1 job/pod concurrency; HPA autoscale by queue depth; read‑only root FS, tmpfs `/tmp`.
+  - IAM Roles for Service Accounts: S3 (scoped prefixes), KMS (encrypt/decrypt), SQS (receive/delete).
+  - Network: private subnets + NAT egress; NetworkPolicy egress allowlist.
+  - SAFE_MODE honored; selectors single‑sourced in `src/infra/selectors/substack.ts`.
+- Criteria:
+  - Queue backlog drains under scale‑up; average draft job ≤ 30s P50.
+  - Jobs isolated: no cookie leakage; each job runs fresh browser context.
+  - Worker pods pass security baseline (non‑root, seccomp runtime default).
+
+## 14) Secure Substack Connect Flow (Email + Code)
+- Scope: Let users connect their publication via email + 6‑digit code; store cookies securely.
+- Steps:
+  1. User enters publication URL + email.
+  2. Worker starts login, requests 6‑digit code.
+  3. User enters code; worker completes login and saves storageState.
+  4. Storage state encrypted (envelope): KMS CMK → data key → AES‑GCM; stored in S3 path `auth-states/{tenant}/{publication}.json.enc` with TTL + metadata.
+  5. Publication record updated with `auth_state_key` and `auth_updated_at`.
+- Criteria:
+  - No cookie body in logs; only fingerprints.
+  - Expired cookies trigger reconnect flow.
+  - Decrypt only in memory inside worker.
+
+## 15) Observability, SLOs, and Alerting
+- Scope: End‑to‑end telemetry and actionable alerts.
+- Plan:
+  - Logs: structured JSON (tenant_id, job_id, tool, phase, status, duration). Redact PII.
+  - Metrics: job throughput, success/fail rate, queue depth, browser start failures, token usage.
+  - Tracing: OpenTelemetry (optional) with spans for tool calls and driver steps.
+  - Alerts: high queue depth, job failure spikes, reconnect spikes, 5xx rate.
+- Criteria:
+  - On failure spikes, alert fires and links to runbook.
+  - Dashboards show P50/P95 for draft/update/publish durations.
+
+## 16) CI/CD & IaC
+- Scope: Reproducible infra and safe deployments.
+- Plan:
+  - Terraform (or Pulumi) for VPC, EKS/ECS, SQS, S3, KMS, RDS.
+  - Two Docker images: `api` (if needed) and `worker`.
+  - Pipelines: lint, typecheck, unit tests, light Playwright mock tests, build & push images, deploy with canary.
+- Criteria:
+  - One‑command env bring‑up; rollback < 10 minutes.
+  - Secrets never baked into images; runtime via IAM/KMS/Secrets Manager.
+
+## 17) Security & Compliance
+- Scope: Systemic hardening and data handling policies.
+- Plan:
+  - HTTPS/HSTS, strict CSP, CSRF tokens on web forms, SameSite=strict cookies.
+  - Key rotation policy for KMS; S3 lifecycle rules for artifacts.
+  - Access reviews; least‑privilege IAM; audit logs for sensitive ops (publish).
+  - Privacy: user export/delete endpoints.
+- Criteria:
+  - External review passes baseline security checklist.
+  - Verified redaction of secrets across logs and error surfaces.

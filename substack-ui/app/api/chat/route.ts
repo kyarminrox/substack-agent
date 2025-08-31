@@ -1,4 +1,4 @@
-import { streamText, tool, convertToModelMessages } from "ai";
+import { streamText, tool, convertToModelMessages, createUIMessageStream, createUIMessageStreamResponse } from "ai";
 import { createGroq } from "@ai-sdk/groq";
 import { z } from "zod";
 import { updateLastSchema, publishSchema } from "@/lib/tools";
@@ -66,6 +66,8 @@ export async function POST(req: Request) {
       }
     };
 
+  let reportStep: undefined | ((ev: { id: string; phase: string; label: string; status: 'pending' | 'in_progress' | 'success' | 'error'; ts?: number; extra?: Record<string, any> }) => void);
+
   const tools = {
     write_draft: (tool as any)({
       description:
@@ -89,18 +91,23 @@ export async function POST(req: Request) {
           console.error("[tools] write_draft args invalid", parsed.error.flatten());
           return { ok: false, error: "Invalid write_draft params" };
         }
-        return createDraftAdapter(parsed.data as { bodyPrompt: string; model?: string });
+        return createDraftAdapter(parsed.data as { bodyPrompt: string; model?: string }, (ev) => reportStep?.(ev));
       },
     }),
     update_last: (tool as any)({
       description: "Update the latest draft (inplace or duplicate).",
       inputSchema: updateLastSchema,
-      execute: wrap("update_last", updateLastAdapter),
+      async execute(rawArgs: any) {
+        // rawArgs already validated/transformed by Zod; forward and report steps
+        return updateLastAdapter(rawArgs as any, (ev) => reportStep?.(ev));
+      },
     }),
     publish: (tool as any)({
       description: "Publish or schedule the draft (web-only by default).",
       inputSchema: publishSchema,
-      execute: wrap("publish", publishAdapter),
+      async execute(rawArgs: any) {
+        return publishAdapter(rawArgs as any, (ev) => reportStep?.(ev));
+      },
     }),
   } as const;
 
@@ -116,30 +123,36 @@ export async function POST(req: Request) {
   );
   console.log("[chat] write_draft.inputSchema dump =", (tools.write_draft as any).inputSchema);
 
-  const result = await streamText({
-    model,
-    system,
-    messages: messagesForModel,
-    tools,
-    toolChoice: "auto",
-    // Fallback: try to repair invalid tool calls by wrapping top-level args.
-    experimental_repairToolCall: async ({ toolCall, error }) => {
-      try {
-        if (!error || typeof error !== "object") return null;
-        // If model sent { bodyPrompt } at top-level, wrap into { input: { bodyPrompt } }
-        const input = (toolCall as any)?.input;
-        if (toolCall.toolName === "write_draft" && input && typeof input === "object") {
-          const hasTopLevelBody = Object.prototype.hasOwnProperty.call(input, "bodyPrompt");
-          const hasInputNested = input && typeof input?.input === "object" && "bodyPrompt" in input.input;
-          if (hasTopLevelBody && !hasInputNested) {
-            const wrapped = { input: { bodyPrompt: input.bodyPrompt, model: (input as any)?.model } };
-            return { ...toolCall, input: JSON.stringify(wrapped) };
-          }
-        }
-      } catch {}
-      return null;
+  const stream = createUIMessageStream({
+    execute: ({ writer }) => {
+      reportStep = (ev) => writer.write({ type: 'data-step', data: ev });
+
+      const result = streamText({
+        model,
+        system,
+        messages: messagesForModel,
+        tools,
+        toolChoice: "auto",
+        experimental_repairToolCall: async ({ toolCall, error }) => {
+          try {
+            if (!error || typeof error !== "object") return null;
+            const input = (toolCall as any)?.input;
+            if (toolCall.toolName === "write_draft" && input && typeof input === "object") {
+              const hasTopLevelBody = Object.prototype.hasOwnProperty.call(input, "bodyPrompt");
+              const hasInputNested = input && typeof input?.input === "object" && "bodyPrompt" in input.input;
+              if (hasTopLevelBody && !hasInputNested) {
+                const wrapped = { input: { bodyPrompt: input.bodyPrompt, model: (input as any)?.model } };
+                return { ...toolCall, input: JSON.stringify(wrapped) };
+              }
+            }
+          } catch {}
+          return null;
+        },
+      });
+
+      writer.merge(result.toUIMessageStream());
     },
   });
 
-  return result.toUIMessageStreamResponse();
+  return createUIMessageStreamResponse({ stream });
 }
