@@ -142,3 +142,51 @@ npm run demo:medium:draft -- "My Title" "<h1>Hi</h1><p>Body</p>" "https://your-s
 License
 
 MIT
+
+## Substack UI chat + tools (ai@5 + Groq)
+
+This repo also contains a minimal Next.js app under `substack-ui/` that exposes a chat endpoint with tool-calling to automate Substack drafting end‑to‑end.
+
+Key points (what finally made it work reliably):
+
+- Single tool definition, in one place: `substack-ui/app/api/chat/route.ts`.
+- ai@5 requires `inputSchema` for tools; do not use `parameters`.
+- Use a permissive schema for provider compatibility:
+  - `inputSchema: z.record(z.any())` for `write_draft` so the provider never rejects on extra keys.
+  - Validate and normalize inside `execute` (unwrap `rawArgs.input ?? rawArgs`, accept `bodyPrompt|prompt|topic|text|query`).
+- Provider repair: if a model emits `{ bodyPrompt }` at the top level, an `experimental_repairToolCall` hook wraps it into `{ input: { bodyPrompt } }`.
+- Messages are always converted: `messages: convertToModelMessages(messages)`.
+- System hint steers the correct argument name: “put the user’s prompt under key bodyPrompt (not topic).”
+
+Environment that must be set for Groq-backed writing:
+
+- In `substack-ui/.env.local`:
+  - `GROQ_API_KEY=...`
+  - `GROQ_MODEL=meta-llama/llama-4-scout-17b-16e-instruct` (or any Groq model you prefer)
+  - `AI_PROVIDER=groq` (crucial: ensures the writer uses Groq instead of the local stub)
+
+Run order (avoid stale modules):
+
+```
+npm run build
+cd substack-ui && npm run dev
+```
+
+Expected logs when working:
+
+- Chat: `[chat] ... tools= [ 'write_draft', ... ]`
+- Tool schema: `write_draft.inputSchema isZodSafeParse = true`
+- Writer: `{"ch":"ai", "provider":"groq", "prompt": ...}`
+- Substack driver: `compose_opened`, `title_fill`, `body_insert`, `draft_created`.
+
+Common pitfalls + fixes:
+
+- Provider rejects with “additionalProperties ... not allowed” → switch to `inputSchema` and use a permissive Zod (as above). Do not use `parameters` with strict JSON.
+- Tool defined in multiple files → remove duplicates; only `route.ts` should export the tools object used by `streamText`.
+- Writer inserts “Local stub ...” → set `AI_PROVIDER=groq` in `substack-ui/.env.local` so `src/infra/gateway.ts` resolves GroqProvider.
+
+### Extending tools (update, publish, schedule)
+
+- `update_last`: already implemented. Its `inputSchema` accepts `{ title?, bodyPrompt?, model?, mode? }`. In `execute`, call `updateLastAdapter` (it regenerates HTML if `bodyPrompt` is provided; supports in-place vs duplicate).
+- `publish`: already implemented. Accepts `{ postId?, sendEmail?, scheduleAt? }`. The driver defaults to web-only unless `sendEmail=true`.
+- Add new tool: keep it in `route.ts`, define a Zod `inputSchema`, normalize args in `execute`, and delegate to a server adapter in `substack-ui/lib/agent-bridge.ts`.

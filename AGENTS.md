@@ -65,3 +65,25 @@ Configuration:
 - Require `GROQ_API_KEY` in `.env`
 - Models: `llama3-groq-70b-tool-use-preview`, `llama3-groq-8b-tool-use-preview`
 
+## Tool‑Calling (ai@5) – What we learned
+
+- Define tools once in `substack-ui/app/api/chat/route.ts`.
+- Use `inputSchema` (Zod) with ai@5 instead of `parameters`.
+- Prefer permissive schemas for provider compatibility (`z.record(z.any())` for write paths). Validate inside `execute`.
+- Normalize shapes (`rawArgs.input ?? rawArgs`), accept `bodyPrompt|prompt|topic|text|query`.
+- Always call `convertToModelMessages(messages)` before passing to the model.
+- Add a system hint: “When drafting, call tool write_draft and put the user’s prompt under key bodyPrompt (not topic).”
+- Optional `experimental_repairToolCall` can wrap `{ bodyPrompt }` → `{ input: { bodyPrompt } }` if a provider emits a strict variant.
+
+### Writer provider selection
+
+- The writer resolves its provider in `src/infra/gateway.ts`.
+- Set `AI_PROVIDER=groq` (in `substack-ui/.env.local`) + `GROQ_API_KEY` + `GROQ_MODEL` to ensure Groq is used instead of the local stub.
+- Symptom when misconfigured: editor body contains “Local stub for: Topic …” instead of generated paragraphs.
+
+### Debug checklist
+
+- Route logs: `write_draft.inputSchema isZodSafeParse = true`.
+- Writer logs: `{ provider: 'groq', prompt: ... }`.
+- Substack driver logs: `compose_opened`, `title_fill`, `body_insert`, `draft_created` with an `editUrl`.
+

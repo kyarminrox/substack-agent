@@ -3,6 +3,16 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
+  "main": "./dist/index.js",
+  "exports": {
+    "./brains/writer": "./dist/brains/writer.js",
+    "./drivers/substack.driver": "./dist/drivers/substack.driver.js",
+    "./infra/logger": "./dist/infra/logger.js",
+    "./infra/runs": "./dist/infra/runs.js"
+  },
+  "files": [
+    "dist"
+  ],
   "engines": {
     "node": ">=18.17.0"
   },
@@ -18,8 +28,13 @@
     "demo:substack:publish": "node --loader ts-node/esm src/cli/demo_substack.ts publish",
     "agent:substack:write": "node --loader ts-node/esm src/cli/demo_substack.ts agent:write",
     "agent:update": "node --loader ts-node/esm src/cli/demo_substack.ts agent:update",
-    "runs:substack": "node --loader ts-node/esm src/cli/runs_substack.ts"
+    "runs:substack": "node --loader ts-node/esm src/cli/runs_substack.ts",
+    "clean": "rimraf dist",
+    "dev:ui": "cd substack-ui && npm run dev"
   },
+  "workspaces": [
+    "substack-ui"
+  ],
   "dependencies": {
     "dotenv": "^17.2.1",
     "groq-sdk": "^0.5.0",
@@ -38,6 +53,7 @@
     "prettier": "^3.3.3",
     "ts-node": "^10.9.2",
     "typescript": "^5.4.5",
-    "vitest": "^2.0.5"
+    "vitest": "^2.0.5",
+    "rimraf": "^6.0.1"
   }
 }

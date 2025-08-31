@@ -1,0 +1,29 @@
+{
+  "name": "substack-ui",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "predev": "npm --prefix .. run build",
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "lint:types": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@ai-sdk/groq": "^2.0.16",
+    "@ai-sdk/react": "^2.0.28",
+    "ai": "^5.0.28",
+    "next": "^14.2.32",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "zod": "^3.23.8",
+    "substack-agent": "file:.."
+  },
+  "devDependencies": {
+    "@types/node": "^20.12.12",
+    "@types/react": "^18.2.67",
+    "@types/react-dom": "^18.2.22",
+    "typescript": "^5.4.5"
+  }
+}

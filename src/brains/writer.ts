@@ -5,10 +5,11 @@ import { appendRun } from '../infra/runs.js';
 import { mdToHtml, stripLeadingMdTitle } from '../infra/markdown.js';
 import type { AIResponse } from '../types/ai.js';
 
-export type WriterInput = { topic: string; model?: string; updateLast?: boolean; overrideTitle?: string };
+export type GenerateDraftInput = { topic: string; model?: string; updateLast?: boolean; overrideTitle?: string };
+export type WriterInput = GenerateDraftInput;
 export type WriterOutput = { title: string; html: string; editUrl?: string };
 
-export async function generateDraft({ topic, model, updateLast, overrideTitle }: WriterInput): Promise<WriterOutput> {
+export async function generateDraft({ topic, model, updateLast, overrideTitle }: GenerateDraftInput): Promise<WriterOutput> {
   const provider = resolveProvider(model);
 
   const aiPrompt = [
