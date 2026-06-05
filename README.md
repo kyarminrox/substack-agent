@@ -1,6 +1,6 @@
 # Substack Agent
 
-AI agent to draft, schedule, publish, cross-post, and manage audience ops across **Substack** (via Playwright) and **Medium** (via API), with a clean driver interface and a review/approval dashboard.
+Open-source AI agent to draft, schedule, publish, cross-post, and manage audience ops across **Substack** (via Playwright) and **Medium** (via API), with a clean driver interface and a review/approval dashboard.
 ## Status
 v0.1 — scaffolding and drivers. See `docs/Project-Requirements.md` for scope and plan.
 
